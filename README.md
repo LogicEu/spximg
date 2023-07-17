@@ -3,7 +3,8 @@
 Simple header only library for loading and saving image files. It supports
 PNG, JPEG, GIF and PPM. This header is part of the 
 [spxx](https://github.com/LogicEu/spxx.git) project. The main difference
-with similar projects like [stb_image.h](https://github.com/nothings/stb/stb_image.h)
+with similar projects like 
+[stb_image.h](https://github.com/nothings/stb/blob/master/stb_image.h)
 is that spximg.h assumes that most computers nowadays already have some version of
 the [libpng](https://github.com/glennrp/libpng.git) and the 
 [libjpeg](https://github.com/LuaDist/libjpeg.git) libraries, so it doesn't implement
