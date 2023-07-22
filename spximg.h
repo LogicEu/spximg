@@ -42,7 +42,6 @@ GIF file formats.
 
 ****************************************************/
 
-#include <spxe.h>
 #include <stdint.h>
 
 typedef struct Img2D {
@@ -52,21 +51,10 @@ typedef struct Img2D {
     int height;
 } Img2D;
 
-typedef struct Tex2D {
-    Px* fb;
-    int width;
-    int height;
-} Tex2D;
-
 Img2D spxImageCreate(int width, int height, int channels);
 Img2D spxImageLoad(const char* path);
 int spxImageSave(Img2D image, const char* path);
 void spxImageFree(Img2D* image);
-
-Tex2D spxTextureCreate(int width, int height);
-Tex2D spxTextureLoad(const char* path);
-int spxTextureSave(const Tex2D texture, const char* path);
-void spxTextureFree(Tex2D* texture);
 
 #ifdef SPXI_APPLICATION
 
@@ -107,7 +95,7 @@ static int spxStrcmpLower(const char* s1, const char* s2)
     return 1;
 }
 
-static int spxParseFormat(const char* path)
+static int spxParseExtension(const char* path)
 {
     size_t i, dotpos = 0;
     for (i = 0; path[i]; ++i) {
@@ -118,13 +106,13 @@ static int spxParseFormat(const char* path)
     
     if (dotpos) {
         const char* ext = path + dotpos + 1;
-        if (spxiStrcmpLower(ext, "png")) {
+        if (spxStrcmpLower(ext, "png")) {
             return SPXI_FORMAT_PNG;
-        } else if (spxiStrcmpLower(ext, "jpeg") || spxiStrcmpLower(ext, "jpg")) {
+        } else if (spxStrcmpLower(ext, "jpeg") || spxStrcmpLower(ext, "jpg")) {
             return SPXI_FORMAT_JPEG;
-        } else if (spxiStrcmpLower(ext, "gif")) {
+        } else if (spxStrcmpLower(ext, "gif")) {
             return SPXI_FORMAT_GIF;
-        } else if (spxiStrcmpLower(ext, "ppm")) {
+        } else if (spxStrcmpLower(ext, "ppm")) {
             return SPXI_FORMAT_PPM;
         }
     }
@@ -132,72 +120,120 @@ static int spxParseFormat(const char* path)
     return SPXI_FORMAT_UNKNOWN;
 }
 
-static int spxParseHeader(const char* filebuf)
+static int spxParseHeaderPng(const uint8_t* header)
 {
-    if (!memcmp(filebuf, "\211PNG\r\n\032\n", 8)) {
+    return !memcmp(header, "\211PNG\r\n\032\n", 8);
+}
+
+static int spxParseHeaderJpeg(const uint8_t* header)
+{
+    return header[0] == 0xFF && header[1] == 0xD8 && header[2] == 0xFF;
+}
+
+static int spxParseHeaderGif(const uint8_t* header)
+{
+    return !memcmp(header, "GIF87a", 6) || !memcmp(header, "GIF89a", 6);
+}
+
+static int spxParseHeaderPpm(const uint8_t* header)
+{
+    return (char)header[0] == 'P' && (char)header[1] >= '1' && (char)header[1] <= '6';
+}
+
+static int spxParseHeader(FILE* file)
+{
+    if (!memcmp(header, "\211PNG\r\n\032\n", 8)) {
         return SPXI_FORMAT_PNG;
-    } else if (filebuf[0] == 0xFF && filebuf[1] == 0xD8 && filebuf[2] == 0xFF) {
+    } else if (header[0] == 0xFF && header[1] == 0xD8 && header[2] == 0xFF) {
         return SPXI_FORMAT_JPEG;
-    } else if (!memcmp(filebuf, "GIF87a", 6) || !memcmp(filebuf, "GIF89a", 6)) {
+    } else if (!memcmp(header, "GIF87a", 6) || !memcmp(header, "GIF89a", 6)) {
         return SPXI_FORMAT_GIF;
-    } else if (!memcmp(filebuf, "P6 ", 3)) {
+    } else if (!memcmp(header, "P6 ", 3)) {
         return SPXI_FORMAT_PPM;
     }
 
     return SPXI_FORMAT_UNKNOWN;
 }
 
-static char* spxFileRead(const char* path)
+static int spxParseFormat(const char* path, const uint8_t* header)
 {
-    char* buf = NULL;
-    FILE* file = fopen(path, "rb");
-    
-    if (file) {
-        size_t len;
-        fseek(file, 0, SEEK_END);
-        len = ftell(file);
-        fseek(file, 0, SEEK_SET);
-        buf = malloc(len);
-        fread(buf, len, sizeof(char), file);
-        fclose(file);
+    int format = spxParseExtension(path);
+    if (format == SPXI_FORMAT_PNG && spxParseHeaderPng(header) ||
+        format == SPXI_FORMAT_JPEG && spxParseHeaderJpeg(header) ||
+        format == SPXI_FORMAT_GIF && spxParseHeaderGif(header) ||
+        format == SPXI_FORMAT_PPM && spxParseHeaderPpm(header)) {
+        return format;
     }
-
-    return buf;
+    return spxParseHeader(path, header);
 }
 
-static Tex2D spxImageLoadGuess(const char* path)
+static Img2D spxImageLoadPpm(const char* path)
+{
+    int max;
+    size_t size;
+    char header[256];
+    Img2D image = {NULL, 0, 0, 0};
+    FILE* file = fopen(path, "rb");
+    if (!file) {
+        fprintf(stderr, "file exists but cannot be opened: %s\n", path);
+        return image;
+    }
+
+    fgets(header, 256, file);
+    sscanf(header, "P%d %d %d %d", &image.channels, &image.width, &image.height, &max);
+    image.channels = image.channels > 3 ? image.channels / 2 : image.channels;
+
+    fclose(file);
+    return image;
+}
+
+static Img2D spxImageLoadGuess(FILE* file)
+{
+    Img2D image = {NULL, 0, 0, 0};
+
+    switch (spxParseHeader(file)) {
+        /*
+        case SPXI_FORMAT_PNG: image = spxImageLoadPng(path); break;
+        case SPXI_FORMAT_JPEG: image = spxImageLoadJpeg(path); break;
+        case SPXI_FORMAT_GIF: image = spxImageLoadGif(path); break;
+        */
+        case SPXI_FORMAT_PPM: image = spxImageLoadPpm(path); break;
+        default: fprintf(
+            stderr, 
+            "spximg could not recognize image format of file '%s'\n", 
+            path
+        );:%
+    }
+
+    return image;
+}
+
+Img2D spxImageLoad(const char* path)
 {
     int format;
-    Tex2D texture = {NULL, 0, 0};
-    char* filebuf = spxiFileRead(const char* path);
-    if (!filebuf) {
-        fprintf(stderr, "spximg could not open file '%s'\n", path);
-        return texture;
+    uint8_t header[8];
+    Img2D image = {NULL, 0, 0, 0};
+    FILE* file = fopen(path, "rb");
+    if (!file) {
+        fprintf(stderr, "spximg could not open file: %s\n", path);
+        return image;
     }
 
-    format = spxiParseHeader(filebuf);
-    if (!format) {
-        fprintf(stderr, "spximg does not recognize image format of file '%s'\n", path);
-        return texture;
-    }
+    fread(header, 8, sizeof(uint8_t), file);
+    fclose(file);
 
+    format = spxParseFormat(path, header);
     switch (format) {
+        /*
         case SPXI_FORMAT_PNG: return spxImageLoadPng(path);
         case SPXI_FORMAT_JPEG: return spxImageLoadJpeg(path);
         case SPXI_FORMAT_GIF: return spxImageLoadGif(path);
+        */
         case SPXI_FORMAT_PPM: return spxImageLoadPpm(path);
     }
-}
 
-Tex2D spxImageLoad(const char* path)
-{
-    switch (spxiParseFormat(path))
-        case SPXI_FORMAT_PNG: return spxImageLoadPng(path);
-        case SPXI_FORMAT_JPEG: return spxImageLoadJpeg(path);
-        case SPXI_FORMAT_GIF: return spxImageLoadGif(path);
-        case SPXI_FORMAT_PPM: return spxImageLoadPpm(path);
-    }
-    return spxImageLoadGuess(path);
+    image = spxImageLoadGuess(file);
+    return image;
 }
 
 Img2D spxImageCreate(int width, int height, int channels)
@@ -208,31 +244,21 @@ Img2D spxImageCreate(int width, int height, int channels)
     image.height = height;
     image.channels = channels;
     size = width * height * channels;
-    image.fb = malloc(size);
-    memset(image.fb, 255, size);
+    image.pixbuf = malloc(size);
+    memset(image.pixbuf, 255, size);
     return image;
-}
-
-Img2D spxImageReshape(const Img2D image, int channels)
-{
-    Img2D reshaped;
-    reshaped.channels = channels;
-    reshaped.width = image.width;
-    reshaped.height = image.height;
-    reshaped.fb = (uint8_t*)malloc(reshaped.width * reshaped.height * channels);
-    switch (channels) {
-        case 
-    }
-    return reshaped;
 }
 
 int spxImageSave(const Img2D image, const char* path)
 {
-    switch (spxiParseFormat(path)) {
+    (void)image;
+    switch (spxParseExtension(path)) {
+        /*
         case SPXI_FORMAT_PNG: return spxImageSavePng(image, path);
         case SPXI_FORMAT_JPEG: return spxImageSaveJpeg(image, path);
         case SPXI_FORMAT_GIF: return spxImageSaveGif(image, path);
         case SPXI_FORMAT_PPM: return spxImageSavePpm(image, path);
+        */
     }
 
     fprintf(stderr, "spximg only supports saving .png, .jpeg, .gif and .ppm files\n");
@@ -241,56 +267,12 @@ int spxImageSave(const Img2D image, const char* path)
 
 void spxImageFree(Img2D* image)
 {
-    if (image.fb) {
-        free(image.fb);
-        image.fb = NULL;
-        image.width = 0;
-        image.height = 0;
-        image.channels = 0;
-    }
-}
-
-/* texture implementation */
-
-Tex2D spxTextureCreate(int width, int height)
-{
-    size_t size;
-    Tex2D texture;
-    texture.width = width;
-    texture.height = height;
-    size = width * height * sizeof(Px);
-    texture.fb = malloc(size);
-    memset(texture.fb, 255, size);
-    return texture;
-}
-
-Tex2D spxTextureFromImage(const Img2D image)
-{
-    Tex2D texture = {NULL, image.width, image.height};
-    if (image.channels != sizeof(Px)) {
-        image = spxImageReshape(image, sizeof(Px));
-        texture.fb = image.fb;
-    } else {
-        texture.fb = (uint8_t*)malloc(texture.width * texture.height * sizeof(Px));
-        memcpy(texture.fb, image.fb, texture.width * texture.height * sizeof(Px));
-    }
-
-    return texture;
-}
-
-int spxTextureSave(const Tex2D texture, const char* path)
-{
-    Img2D image = {texture.fb, 4, textures.width, textures.height};
-    return spxImageSave(image, path);  
-}
-
-void spxTextureeFree(Tex2D* texture)
-{
-    if (texture.fb) {
-        free(texture.fb);
-        texture.fb = NULL;
-        texture.width = 0;
-        texture.height = 0;
+    if (image->pixbuf) {
+        free(image->pixbuf);
+        image->pixbuf = NULL;
+        image->width = 0;
+        image->height = 0;
+        image->channels = 0;
     }
 }
 
