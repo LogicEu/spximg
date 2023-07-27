@@ -3,107 +3,139 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-#include <sys/stat.h>
 #include <jpeglib.h>
 
-int spxImageSaveJpeg(const Img2D img, const char* path, const int quality) 
+#ifndef SPXI_JPEG_QUALITY 
+#define SPXI_JPEG_QUALITY 100
+#endif /* SPXI_JPEG_QUALITY */
+
+Img2D spxImageReshape2to1(const Img2D img)
 {
-    struct jpeg_compress_struct cinfo;
-    struct jpeg_error_mgr jerr;
+    Img2D ret;
+    int i, x, y;
+    const int stride = img.width * img.channels;
+    
+    assert(img.channels == 2);
+    ret.width = img.width;
+    ret.height = img.height;
+    ret.channels = 1;
+    ret.pixbuf = (uint8_t*)malloc(img.width * img.height);
 
-    JSAMPROW row_pointer[1];
-
-    cinfo.err = jpeg_std_error(&jerr);
-    jpeg_create_compress(&cinfo);
-
-    FILE* file = fopen(path, "wb");
-    if (!file) {
-        fprintf(stderr, "imgtool could not write JPEG file '%s'\n", path);
-        return;
+    for (y = 0, i = 0; y < img.height; ++y) {
+        for (x = 0; x < img.width; ++x, ++i) {
+            ret.pixbuf[i * img.width] = img.pixbuf[i * stride];
+        }
     }
 
-    jpeg_stdio_dest(&cinfo, file);
-
-    cinfo.image_width = width;
-    cinfo.image_height = height;
-    cinfo.input_components = 3;	
-    cinfo.in_color_space = JCS_RGB;
-
-    jpeg_set_defaults(&cinfo);
-    jpeg_set_quality(&cinfo, quality, TRUE);
-    jpeg_start_compress(&cinfo, TRUE);
-
-    int row_stride = width * 3;
-    while (cinfo.next_scanline < cinfo.image_height) {
-        row_pointer[0] = (uint8_t*)(size_t)(data + cinfo.next_scanline * row_stride);
-        jpeg_write_scanlines(&cinfo, row_pointer, 1);
-    }
-    jpeg_finish_compress(&cinfo);
-
-    fclose(file);
-    jpeg_destroy_compress(&cinfo);
+    return ret;
 }
 
-uint8_t* jpeg_file_load(const char* restrict path, unsigned int* w, unsigned int* h)
+Img2D spxImageLoadJpeg(const char* path)
 {
-	struct stat file_info;
-	struct jpeg_decompress_struct cinfo;
-	struct jpeg_error_mgr jerr;
-
-	unsigned long bmp_size;
-	uint8_t *bmp_buffer;
-	int row_stride, width, height, pixel_size;
-
-    int rc = stat(path, &file_info);
-    if (rc) {
-        fprintf(stderr, "imgtool could not get info about JPEG file '%s'\n", path);
-        return NULL;
-    }
-
-	unsigned long jpg_size = file_info.st_size;
-	uint8_t* jpg_buffer = (uint8_t*)malloc(jpg_size + 100);
+    int i;
+    void* fbuffer;
+	size_t fsize, stride;
+	Img2D img = {NULL, 0, 0, 0};
+    
+    struct jpeg_decompress_struct info;
+	struct jpeg_error_mgr err;
 
 	FILE* file = fopen(path, "rb");
     if (!file) {
-        fprintf(stderr, "imgtool could not open JPEG file '%s'\n", path);
-        return NULL;
+        fprintf(stderr, "could not open file '%s'\n", path);
+        return img;
     } 
 
-	fread(jpg_buffer, jpg_size, 1, file);
+    fseek(file, 0, SEEK_END);
+    fsize = ftell(file);
+    fbuffer = malloc(fsize);
+    
+    fseek(file, 0, SEEK_SET);
+	fread(fbuffer, fsize, sizeof(uint8_t), file);
 	fclose(file);  
 
-	cinfo.err = jpeg_std_error(&jerr);	
-	jpeg_create_decompress(&cinfo);
-	jpeg_mem_src(&cinfo, jpg_buffer, jpg_size);
-	rc = jpeg_read_header(&cinfo, TRUE);
+	info.err = jpeg_std_error(&err);	
+	jpeg_create_decompress(&info);
+	jpeg_mem_src(&info, fbuffer, fsize);
 
-	if (rc != 1) {
-		fprintf(stderr, "file '%s' does not seem to be a normal JPEG.\n", path);
-		return NULL;
+	if (jpeg_read_header(&info, 1) != 1) {
+		fprintf(stderr, "file '%s' is not a standard JPEG\n", path);
+		return img;
 	}
 
-	jpeg_start_decompress(&cinfo);
+	jpeg_start_decompress(&info);
 
-    width = cinfo.output_width;
-	height = cinfo.output_height;
-	pixel_size = cinfo.output_components;
+    img.width = info.output_width;
+	img.height = info.output_height;
+	img.channels = info.output_components;
 
-	bmp_size = width * height * pixel_size;
-	bmp_buffer = (uint8_t*)malloc(bmp_size);
-	row_stride = width * pixel_size;
+	stride = img.width * img.channels;
+	img.pixbuf = (uint8_t*)malloc(img.height * stride);
 
-	while (cinfo.output_scanline < cinfo.output_height) {
-		uint8_t *buffer_array[1];
-		buffer_array[0] = bmp_buffer + (cinfo.output_scanline) * row_stride;
-		jpeg_read_scanlines(&cinfo, buffer_array, 1);
+    for (i = 0; i < img.height; ++i) {
+        uint8_t* rowptr = img.pixbuf + i * stride;
+		jpeg_read_scanlines(&info, &rowptr, 1);
 	}
-	jpeg_finish_decompress(&cinfo);
-	jpeg_destroy_decompress(&cinfo);
-	free(jpg_buffer);
 
-    *w = width;
-    *h = height;
-    return bmp_buffer;
+	jpeg_finish_decompress(&info);
+	jpeg_destroy_decompress(&info);
+	free(fbuffer);
+
+    return img;
+}
+
+int spxImageSaveJpeg(const Img2D img, const char* path, const int quality) 
+{
+    FILE* file;
+    int i, stride;
+    struct jpeg_compress_struct info;
+    struct jpeg_error_mgr err;
+
+    /* REPLACE WITH spxImageReshape(); */
+    if (img.channels == 2 || img.channels == 4) {
+        int ret;
+        Img2D tmp;
+        
+        switch (img.channels) {
+            case 2: tmp = spxImageReshape2to1(img); break;
+            case 4: tmp = spxImageReshape4to3(img); break;
+        }
+        
+        ret = spxImageSaveJpeg(tmp, path, quality);
+        spxImageFree(&tmp);
+        return ret;
+    }
+
+    assert(img.channels == 1 || img.channels == 3);
+    info.err = jpeg_std_error(&err);
+    jpeg_create_compress(&info);
+
+    file = fopen(path, "wb");
+    if (!file) {
+        fprintf(stderr, "spximg could not write file '%s'\n", path);
+        return EXIT_FAILURE;
+    }
+
+    jpeg_stdio_dest(&info, file);
+
+    info.image_width = img.width;
+    info.image_height = img.height;
+    info.input_components = img.channels;
+    info.in_color_space = img.channels == 1 ? JCS_GRAYSCALE : JCS_RGB;
+
+    jpeg_set_defaults(&info);
+    jpeg_set_quality(&info, quality, 1);
+    jpeg_start_compress(&info, 1);
+
+    stride = img.width * img.channels;
+    for (i = 0; i < img.height; ++i) {
+        uint8_t* rowptr = img.pixbuf + i * stride;
+        jpeg_write_scanlines(&info, &rowptr, 1);
+    }
+
+    jpeg_finish_compress(&info);
+    jpeg_destroy_compress(&info);
+    return fclose(file);
 }
 
 static const char* spxFormatName(int format)
@@ -147,8 +179,8 @@ int main(const int argc, const char** argv)
         image.channels
     );
 
-    img = spxImageCreate(400, 300, 3);
-    spxImageSaveJpeg(img, "images/bmp.jpeg");
+    img = spxImageCreate(400, 300, 1);
+    spxImageSaveJpeg(img, "images/bmp.jpeg", SPXI_JPEG_QUALITY);
 
     if (image.channels == 4) {
         Img2D tmp = spxImageReshape4to3(image);
