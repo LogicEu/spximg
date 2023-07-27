@@ -75,11 +75,19 @@ void spxImageFree(Img2D* image);
 
 /* Core Simple Pixel Image Functions */
 
-#define SPXI_FORMAT_UNKNOWN 0
-#define SPXI_FORMAT_PNG     1
-#define SPXI_FORMAT_JPEG    2
-#define SPXI_FORMAT_GIF     3
-#define SPXI_FORMAT_PPM     4
+#define SPXI_FORMAT_UNKNOWN     0
+#define SPXI_FORMAT_PNG         1
+#define SPXI_FORMAT_JPEG        2
+#define SPXI_FORMAT_GIF         3
+#define SPXI_FORMAT_PPM         4
+
+#define SPXI_COLOR_UNKNOWN      0
+#define SPXI_COLOR_GRAY         1
+#define SPXI_COLOR_GRAY_ALPHA   2
+#define SPXI_COLOR_RGB          3
+#define SPXI_COLOR_RGBA         4
+
+#define SPXI_BIT_DEPTH          8
 
 static int spxStrcmpLower(const char* s1, const char* s2)
 {

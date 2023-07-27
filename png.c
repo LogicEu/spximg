@@ -2,11 +2,63 @@
 #include <spximg.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <assert.h>
 #include <png.h>
+
+const char* spxImageChannelsString(int colorType)
+{
+    switch (colorType) {
+        case SPXI_COLOR_RGBA: return "RGBA";
+        case SPXI_COLOR_RGB: return "RGB";
+        case SPXI_COLOR_GRAY_ALPHA: return "GrayAlpha";
+        case SPXI_COLOR_GRAY: return "Gray";                        
+    }
+    return "Unknown";
+}
+
+const char* spxImageColorTypeString(int colorType)
+{
+    switch (colorType) {
+        case PNG_COLOR_TYPE_RGBA: return "RGBA";
+        case PNG_COLOR_TYPE_RGB: return "RGB";
+        case PNG_COLOR_TYPE_GRAY_ALPHA: return "GrayAlpha";
+        case PNG_COLOR_TYPE_GRAY: return "Gray";                        
+        case PNG_COLOR_TYPE_PALETTE: return "Palette";
+    }
+    return "Unknown";
+}
+
+int spxImageColorTypeToChannels(int channels)
+{
+    switch (channels) {
+        case PNG_COLOR_TYPE_GRAY: return SPXI_COLOR_GRAY;
+        case PNG_COLOR_TYPE_GRAY_ALPHA: return SPXI_COLOR_GRAY_ALPHA;
+        case PNG_COLOR_TYPE_RGB: return SPXI_COLOR_RGB;
+        case PNG_COLOR_TYPE_RGBA: return SPXI_COLOR_RGBA;
+        case PNG_COLOR_TYPE_PALETTE: return SPXI_COLOR_RGBA;
+    }
+    
+    fprintf(stderr, "PNG does not support %d number of channels per pixel.\n", channels);
+    return EXIT_FAILURE;
+}
+
+int spxImageChannelsToColorType(int channels)
+{
+    switch (channels) {
+        case SPXI_COLOR_GRAY: return PNG_COLOR_TYPE_GRAY;
+        case SPXI_COLOR_GRAY_ALPHA: return PNG_COLOR_TYPE_GRAY_ALPHA;
+        case SPXI_COLOR_RGB: return PNG_COLOR_TYPE_RGB;
+        case SPXI_COLOR_RGBA: return PNG_COLOR_TYPE_RGBA;
+    }
+    
+    fprintf(stderr, "PNG does not support %d number of channels per pixel.\n", channels);
+    return EXIT_FAILURE;
+}
 
 Img2D spxImageLoadPng(const char* path)
 {
     int i;
+    size_t rowSize;
     Img2D img = {NULL, 0, 0, 0};
     png_byte bitDepth, colorType;
     png_structp png;
@@ -34,11 +86,14 @@ Img2D spxImageLoadPng(const char* path)
     png_init_io(png, file);
     png_read_info(png, info);
     
-    img.width = png_get_image_width(png, info);
-    img.height = png_get_image_height(png, info);
-
     colorType = png_get_color_type(png, info);
     bitDepth = png_get_bit_depth(png, info);
+
+    img.width = png_get_image_width(png, info);
+    img.height = png_get_image_height(png, info);
+    img.channels = spxImageColorTypeToChannels(colorType);
+
+    fprintf(stdout, "PNG Color Type Before: %s\n", spxImageColorTypeString(colorType));
 
     if (bitDepth == 16) {
         png_set_strip_16(png);
@@ -54,24 +109,22 @@ Img2D spxImageLoadPng(const char* path)
 
     if (png_get_valid(png, info, PNG_INFO_tRNS)) {
         png_set_tRNS_to_alpha(png);
-    }
-
-    if (colorType == PNG_COLOR_TYPE_RGB ||
-        colorType == PNG_COLOR_TYPE_GRAY ||
-        colorType == PNG_COLOR_TYPE_PALETTE) {
         png_set_filler(png, 0xFF, PNG_FILLER_AFTER);
+        ++img.channels;
     }
 
-    if (colorType == PNG_COLOR_TYPE_GRAY || colorType == PNG_COLOR_TYPE_GRAY_ALPHA) {
-        png_set_gray_to_rgb(png);
-    }
-
-    img.channels = 4;
     png_read_update_info(png, info);
+    colorType = png_get_color_type(png, info);
+    fprintf(stdout, "PNG Color Type After: %s\n", spxImageColorTypeString(colorType));
+
+    rowSize = img.channels * img.width;
+    assert(rowSize == png_get_rowbytes(png, info));
+
     rows = (png_bytep*)malloc(img.height * sizeof(png_bytep));
-    img.pixbuf = (uint8_t*)malloc(img.height * img.width * img.channels);
+    img.pixbuf = (uint8_t*)malloc(img.height * rowSize);
+    
     for (i = 0; i < img.height; i++) {
-        rows[i] = img.pixbuf + i * img.width * img.channels;
+        rows[i] = img.pixbuf + i * rowSize;
     }
 
     png_read_image(png, rows);
@@ -83,7 +136,7 @@ Img2D spxImageLoadPng(const char* path)
 
 void spxImageSavePng(const Img2D img, const char* path) 
 {
-    int i, channels;
+    int i, colorType;
     png_infop info;
     png_structp png;
     png_bytep* rows;
@@ -106,15 +159,11 @@ void spxImageSavePng(const Img2D img, const char* path)
         return;
     }
 
-    channels = img.channels - 1;
-    switch (channels) {
-        case 1: channels = 3; break;
-        case 3: channels = 6; break;
-    }
+    colorType = spxImageChannelsToColorType(img.channels);
 
     png_init_io(png, file);
     png_set_IHDR(
-        png, info, img.width, img.height, 8, channels, 
+        png, info, img.width, img.height, SPXI_BIT_DEPTH, colorType, 
         PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT
     );
 
@@ -127,41 +176,62 @@ void spxImageSavePng(const Img2D img, const char* path)
     png_write_image(png, rows);
     
     png_write_end(png, NULL);
-    free(rows);
     fclose(file);
+    free(rows);
 }
 
-Img2D spxImageReshape4to3(const Img2D img, const int channels)
+static Img2D spxImageReshape4to3(const Img2D img)
 {
-    int x, y;
     Img2D ret;
+    int i, inRowSize = img.width * img.channels, outRowSize = img.width * 3;
+    assert(img.channels == 4);
+
     ret.width = img.width;
     ret.height = img.height;
-    ret.channels = channels;
-    printf("%d\n", img.height);
-    printf("HEIGHT: %d\n", ret.height);
-    ret.pixbuf = (uint8_t*)malloc(img.width * img.height * channels);
-    for (int y = 0; y < img.height; ++y) {
+    ret.channels = 3;
+    ret.pixbuf = (uint8_t*)malloc(img.height * outRowSize);
+
+    for (i = 0; i < img.height; ++i) {
+        memcpy(
+            ret.pixbuf + i * outRowSize,
+            img.pixbuf + i * inRowSize,
+            3
+        );
+    }
+
+    return ret;
+}
+
+static Img2D spxImageReshape4or3to1(const Img2D img)
+{
+    Img2D ret;
+    int i, x, y;
+    assert(img.channels == 4 || img.channels == 3);
+
+    ret.width = img.width;
+    ret.height = img.height;
+    ret.channels = 1;
+    ret.pixbuf = (uint8_t*)malloc(img.height * img.width);
+
+    for (y = 0, i = 0; y < img.height; ++y) {
         for (x = 0; x < img.width; ++x) {
-            memcpy(
-                ret.pixbuf + (img.width * y + x) * channels,
-                img.pixbuf + (img.width * y + x) * img.channels,
-                channels
-            );
+            uint8_t* px = img.pixbuf + i * img.channels;
+            ret.pixbuf[i++] = (px[0] + px[1] + px[2]) / 3;
         }
     }
-    printf("HEIGHT: %d\n", ret.height);
+
     return ret;
 }
 
 int main(const int argc, const char** argv)
 {
+    Img2D image, img;
     if (argc < 2) {
         fprintf(stderr, "%s: missing input argument\n", argv[0]);
         return 1;
     }
 
-    Img2D image = spxImageLoadPng(argv[1]), img;
+    image = spxImageLoadPng(argv[1]);
     if (!image.pixbuf) {
         fprintf(stderr, "%s: could not load file: %s\n", argv[0], argv[1]);
         return 2;
@@ -177,17 +247,20 @@ int main(const int argc, const char** argv)
         image.channels
     );
 
-    img = spxImageCreate(400, 300, 3);
-    spxImageSavePng(img, "bmp.png");
+    img = spxImageCreate(400, 300, 2);
+    spxImageSavePng(img, "images/bmp.png");
 
     if (image.channels == 4) {
         Img2D tmp = spxImageReshape4to3(image, 3);
         spxImageFree(&image);
         image = tmp;
-        printf("out\n");
+    } else if (image.channels < 3) {
+        fprintf(stderr, "Image channels is less than 3!\n");
+        spxImageFree(&image);
+        return EXIT_FAILURE;
     }
 
-    spxImageSave(image, "image.ppm");
+    spxImageSave(image, "images/image.ppm");
     spxImageFree(&image);
     return 0;
 }
