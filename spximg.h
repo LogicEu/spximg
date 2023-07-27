@@ -37,7 +37,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 *******************
 
 C89 header only solution to handle, load and save
-image files. Supports loading PNG, JPEG, PPM and 
+image files. Supports loading PNG, JPEG, PNM and 
 GIF file formats.
 
 ****************************************************/
@@ -77,7 +77,7 @@ void spxImageFree(Img2D* image);
 #define SPXI_FORMAT_PNG         1
 #define SPXI_FORMAT_JPEG        2
 #define SPXI_FORMAT_GIF         3
-#define SPXI_FORMAT_PPM         4
+#define SPXI_FORMAT_PNM         4
 
 #define SPXI_COLOR_UNKNOWN      0
 #define SPXI_COLOR_GRAY         1
@@ -104,6 +104,13 @@ void spxImageFree(Img2D* image);
     #define SPXI_NO_JPEG
     #define SPXI_NO_GIF
 #endif /* SPXI_ONLY_FORMAT */
+
+/* Parsing Name Extensions and File Headers */
+
+#define spxParseHeaderPng(h) (!memcmp(h, "\211PNG\r\n\032\n", 8))
+#define spxParseHeaderJpeg(h) (h[0] == 0xFF && h[1] == 0xD8 && h[2] == 0xFF)
+#define spxParseHeaderGif(h) (!memcmp(h, "GIF87a", 6) || !memcmp(h, "GIF89a", 6))
+#define spxParseHeaderPnm(h) ((char)h[0] == 'P' && (char)h[1] >= '1' && (char)h[1] <= '6')
 
 static int spxStrcmpLower(const char* s1, const char* s2)
 {
@@ -135,31 +142,11 @@ static int spxParseExtension(const char* path)
         } else if (spxStrcmpLower(ext, "gif")) {
             return SPXI_FORMAT_GIF;
         } else if (spxStrcmpLower(ext, "ppm")) {
-            return SPXI_FORMAT_PPM;
+            return SPXI_FORMAT_PNM;
         }
     }
 
     return SPXI_FORMAT_UNKNOWN;
-}
-
-static int spxParseHeaderPng(const uint8_t* header)
-{
-    return !memcmp(header, "\211PNG\r\n\032\n", 8);
-}
-
-static int spxParseHeaderJpeg(const uint8_t* header)
-{
-    return header[0] == 0xFF && header[1] == 0xD8 && header[2] == 0xFF;
-}
-
-static int spxParseHeaderGif(const uint8_t* header)
-{
-    return !memcmp(header, "GIF87a", 6) || !memcmp(header, "GIF89a", 6);
-}
-
-static int spxParseHeaderPpm(const uint8_t* header)
-{
-    return (char)header[0] == 'P' && (char)header[1] >= '1' && (char)header[1] <= '6';
 }
 
 static int spxParseHeader(const uint8_t* header)
@@ -170,8 +157,8 @@ static int spxParseHeader(const uint8_t* header)
         return SPXI_FORMAT_JPEG;
     } else if (spxParseHeaderGif(header)) {
         return SPXI_FORMAT_GIF;
-    } else if (spxParseHeaderPpm(header)) {
-        return SPXI_FORMAT_PPM;
+    } else if (spxParseHeaderPnm(header)) {
+        return SPXI_FORMAT_PNM;
     }
 
     return SPXI_FORMAT_UNKNOWN;
@@ -183,11 +170,79 @@ static int spxParseFormat(const char* path, const uint8_t* header)
     if ((format == SPXI_FORMAT_PNG && spxParseHeaderPng(header)) ||
         (format == SPXI_FORMAT_JPEG && spxParseHeaderJpeg(header)) ||
         (format == SPXI_FORMAT_GIF && spxParseHeaderGif(header)) ||
-        (format == SPXI_FORMAT_PPM && spxParseHeaderPpm(header))) {
+        (format == SPXI_FORMAT_PNM && spxParseHeaderPnm(header))) {
         return format;
     }
     return spxParseHeader(header);
 }
+
+/* Image Reshape Implementation */
+
+static Img2D spxImageReshape4to3(const Img2D img)
+{
+    Img2D ret;
+    int i, inRowSize = img.width * img.channels, outRowSize = img.width * 3;
+    assert(img.channels == 4);
+
+    ret.width = img.width;
+    ret.height = img.height;
+    ret.channels = 3;
+    ret.pixbuf = (uint8_t*)malloc(img.height * outRowSize);
+
+    for (i = 0; i < img.height; ++i) {
+        memcpy(
+            ret.pixbuf + i * outRowSize,
+            img.pixbuf + i * inRowSize,
+            3
+        );
+    }
+
+    return ret;
+}
+
+static Img2D spxImageReshape4or3to1(const Img2D img)
+{
+    Img2D ret;
+    int i, x, y;
+    assert(img.channels == 4 || img.channels == 3);
+
+    ret.width = img.width;
+    ret.height = img.height;
+    ret.channels = 1;
+    ret.pixbuf = (uint8_t*)malloc(img.height * img.width);
+
+    for (y = 0, i = 0; y < img.height; ++y) {
+        for (x = 0; x < img.width; ++x) {
+            uint8_t* px = img.pixbuf + i * img.channels;
+            ret.pixbuf[i++] = (px[0] + px[1] + px[2]) / 3;
+        }
+    }
+
+    return ret;
+}
+
+static Img2D spxImageReshape2to1(const Img2D img)
+{
+    Img2D ret;
+    int i, x, y;
+    const int stride = img.width * img.channels;
+    
+    assert(img.channels == 2);
+    ret.width = img.width;
+    ret.height = img.height;
+    ret.channels = 1;
+    ret.pixbuf = (uint8_t*)malloc(img.width * img.height);
+
+    for (y = 0, i = 0; y < img.height; ++y) {
+        for (x = 0; x < img.width; ++x, ++i) {
+            ret.pixbuf[i * img.width] = img.pixbuf[i * stride];
+        }
+    }
+
+    return ret;
+}
+
+/* Image Formats Saver and Loaders */
 
 #ifndef SPXI_NO_PNG
 #include <png.h>
@@ -344,13 +399,127 @@ int spxImageSavePng(const Img2D img, const char* path)
 #endif /* SPXI_NO_PNG */
 #ifndef SPXI_NO_JPEG
 
+#include <jpeglib.h>
+
+#ifndef SPXI_JPEG_QUALITY 
+#define SPXI_JPEG_QUALITY 100
+#endif /* SPXI_JPEG_QUALITY */
+
+Img2D spxImageLoadJpeg(const char* path)
+{
+    int i;
+    void* fbuffer;
+	size_t fsize, stride;
+	Img2D img = {NULL, 0, 0, 0};
+    
+    struct jpeg_decompress_struct info;
+	struct jpeg_error_mgr err;
+
+	FILE* file = fopen(path, "rb");
+    if (!file) {
+        fprintf(stderr, "could not open file '%s'\n", path);
+        return img;
+    } 
+
+    fseek(file, 0, SEEK_END);
+    fsize = ftell(file);
+    fbuffer = malloc(fsize);
+    
+    fseek(file, 0, SEEK_SET);
+	fread(fbuffer, fsize, sizeof(uint8_t), file);
+	fclose(file);  
+
+	info.err = jpeg_std_error(&err);	
+	jpeg_create_decompress(&info);
+	jpeg_mem_src(&info, fbuffer, fsize);
+
+	if (jpeg_read_header(&info, 1) != 1) {
+		fprintf(stderr, "file '%s' is not a standard JPEG\n", path);
+		return img;
+	}
+
+	jpeg_start_decompress(&info);
+
+    img.width = info.output_width;
+	img.height = info.output_height;
+	img.channels = info.output_components;
+
+	stride = img.width * img.channels;
+	img.pixbuf = (uint8_t*)malloc(img.height * stride);
+
+    for (i = 0; i < img.height; ++i) {
+        uint8_t* rowptr = img.pixbuf + i * stride;
+		jpeg_read_scanlines(&info, &rowptr, 1);
+	}
+
+	jpeg_finish_decompress(&info);
+	jpeg_destroy_decompress(&info);
+	free(fbuffer);
+
+    return img;
+}
+
+int spxImageSaveJpeg(const Img2D img, const char* path, const int quality) 
+{
+    FILE* file;
+    int i, stride;
+    struct jpeg_compress_struct info;
+    struct jpeg_error_mgr err;
+
+    /* REPLACE WITH spxImageReshape(); */
+    if (img.channels == 2 || img.channels == 4) {
+        int ret;
+        Img2D tmp;
+        
+        switch (img.channels) {
+            case 2: tmp = spxImageReshape2to1(img); break;
+            case 4: tmp = spxImageReshape4to3(img); break;
+        }
+        
+        ret = spxImageSaveJpeg(tmp, path, quality);
+        spxImageFree(&tmp);
+        return ret;
+    }
+
+    assert(img.channels == 1 || img.channels == 3);
+    info.err = jpeg_std_error(&err);
+    jpeg_create_compress(&info);
+
+    file = fopen(path, "wb");
+    if (!file) {
+        fprintf(stderr, "spximg could not write file '%s'\n", path);
+        return EXIT_FAILURE;
+    }
+
+    jpeg_stdio_dest(&info, file);
+
+    info.image_width = img.width;
+    info.image_height = img.height;
+    info.input_components = img.channels;
+    info.in_color_space = img.channels == 1 ? JCS_GRAYSCALE : JCS_RGB;
+
+    jpeg_set_defaults(&info);
+    jpeg_set_quality(&info, quality, 1);
+    jpeg_start_compress(&info, 1);
+
+    stride = img.width * img.channels;
+    for (i = 0; i < img.height; ++i) {
+        uint8_t* rowptr = img.pixbuf + i * stride;
+        jpeg_write_scanlines(&info, &rowptr, 1);
+    }
+
+    jpeg_finish_compress(&info);
+    jpeg_destroy_compress(&info);
+    return fclose(file);
+}
+
 #endif /* SPXI_NO_JPEG */
 #ifndef SPXI_NO_GIF
 
 #endif /* SPXI_NO_GIF */
 #ifndef SPXI_NO_PNM
 
-Img2D spxImageLoadPpm(const char* path)
+Img2D spxImageLoadPnm(const char* path)
 {
     size_t size;
     char header[256];
@@ -371,7 +540,7 @@ Img2D spxImageLoadPpm(const char* path)
     return image;
 }
 
-int spxImageSavePpm(const Img2D img, const char* path)
+int spxImageSavePnm(const Img2D img, const char* path)
 {
     FILE* file = fopen(path, "wb");
     if (!file) {
@@ -387,60 +556,17 @@ int spxImageSavePpm(const Img2D img, const char* path)
 
 #endif /* SPXI_NO_PNM */
 
-static Img2D spxImageReshape4to3(const Img2D img)
-{
-    Img2D ret;
-    int i, inRowSize = img.width * img.channels, outRowSize = img.width * 3;
-    assert(img.channels == 4);
-
-    ret.width = img.width;
-    ret.height = img.height;
-    ret.channels = 3;
-    ret.pixbuf = (uint8_t*)malloc(img.height * outRowSize);
-
-    for (i = 0; i < img.height; ++i) {
-        memcpy(
-            ret.pixbuf + i * outRowSize,
-            img.pixbuf + i * inRowSize,
-            3
-        );
-    }
-
-    return ret;
-}
-
-static Img2D spxImageReshape4or3to1(const Img2D img)
-{
-    Img2D ret;
-    int i, x, y;
-    assert(img.channels == 4 || img.channels == 3);
-
-    ret.width = img.width;
-    ret.height = img.height;
-    ret.channels = 1;
-    ret.pixbuf = (uint8_t*)malloc(img.height * img.width);
-
-    for (y = 0, i = 0; y < img.height; ++y) {
-        for (x = 0; x < img.width; ++x) {
-            uint8_t* px = img.pixbuf + i * img.channels;
-            ret.pixbuf[i++] = (px[0] + px[1] + px[2]) / 3;
-        }
-    }
-
-    return ret;
-}
+/* Generic Saving and Loading */
 
 static Img2D spxImageLoadGuess(const char* path, const uint8_t* header)
 {
     Img2D image = {NULL, 0, 0, 0};
 
     switch (spxParseHeader(header)) {
-        /*
         case SPXI_FORMAT_PNG: image = spxImageLoadPng(path); break;
         case SPXI_FORMAT_JPEG: image = spxImageLoadJpeg(path); break;
-        case SPXI_FORMAT_GIF: image = spxImageLoadGif(path); break;
-        */
-        case SPXI_FORMAT_PPM: image = spxImageLoadPpm(path); break;
+        /* case SPXI_FORMAT_GIF: image = spxImageLoadGif(path); break; */
+        case SPXI_FORMAT_PNM: image = spxImageLoadPnm(path); break;
         default: fprintf(
             stderr, 
             "spximg could not recognize image format of file: '%s'\n", 
@@ -468,16 +594,29 @@ Img2D spxImageLoad(const char* path)
 
     format = spxParseFormat(path, header);
     switch (format) {
-        /*
         case SPXI_FORMAT_PNG: return spxImageLoadPng(path);
         case SPXI_FORMAT_JPEG: return spxImageLoadJpeg(path);
-        case SPXI_FORMAT_GIF: return spxImageLoadGif(path);
-        */
-        case SPXI_FORMAT_PPM: return spxImageLoadPpm(path);
+        /* case SPXI_FORMAT_GIF: return spxImageLoadGif(path); */
+        case SPXI_FORMAT_PNM: return spxImageLoadPnm(path);
     }
 
     return spxImageLoadGuess(path, header);
 }
+
+int spxImageSave(const Img2D image, const char* path)
+{
+    switch (spxParseExtension(path)) {
+        case SPXI_FORMAT_PNG: return spxImageSavePng(image, path);
+        case SPXI_FORMAT_JPEG: return spxImageSaveJpeg(image, path, SPXI_JPEG_QUALITY);
+        /* case SPXI_FORMAT_GIF: return spxImageSaveGif(image, path); */
+        case SPXI_FORMAT_PNM: return spxImageSavePnm(image, path);
+    }
+
+    fprintf(stderr, "spximg only supports saving .png, .jpeg, .gif and .ppm files\n");
+    return EXIT_FAILURE;
+}
+
+/* Basic Image Allocation and Deallocation Implementation */
 
 Img2D spxImageCreate(int width, int height, int channels)
 {
@@ -490,22 +629,6 @@ Img2D spxImageCreate(int width, int height, int channels)
     image.pixbuf = malloc(size);
     memset(image.pixbuf, 255, size);
     return image;
-}
-
-int spxImageSave(const Img2D image, const char* path)
-{
-    switch (spxParseExtension(path)) {
-        /*
-        case SPXI_FORMAT_PNG: return spxImageSavePng(image, path);
-        case SPXI_FORMAT_JPEG: return spxImageSaveJpeg(image, path);
-        case SPXI_FORMAT_GIF: return spxImageSaveGif(image, path);
-        case SPXI_FORMAT_PPM: return spxImageSavePpm(image, path);
-        */
-        case SPXI_FORMAT_PPM: return spxImageSavePpm(image, path); break;
-    }
-
-    fprintf(stderr, "spximg only supports saving .png, .jpeg, .gif and .ppm files\n");
-    return EXIT_FAILURE;
 }
 
 void spxImageFree(Img2D* image)
