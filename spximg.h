@@ -73,6 +73,7 @@ void spxImageFree(Img2D* image);
 
 /* Core Simple Pixel Image Functions */
 
+#define SPXI_FORMAT_NULL        (-1)
 #define SPXI_FORMAT_UNKNOWN     0
 #define SPXI_FORMAT_PNG         1
 #define SPXI_FORMAT_JPEG        2
@@ -106,6 +107,8 @@ void spxImageFree(Img2D* image);
 #endif /* SPXI_ONLY_FORMAT */
 
 /* Parsing Name Extensions and File Headers */
+
+#define SPXI_HEADER_SIZE 8
 
 #define spxParseHeaderPng(h) (!memcmp(h, "\211PNG\r\n\032\n", 8))
 #define spxParseHeaderJpeg(h) (h[0] == 0xFF && h[1] == 0xD8 && h[2] == 0xFF)
@@ -164,15 +167,29 @@ static int spxParseHeader(const uint8_t* header)
     return SPXI_FORMAT_UNKNOWN;
 }
 
-static int spxParseFormat(const char* path, const uint8_t* header)
+
+static int spxParseFormat(const char* path)
 {
-    int format = spxParseExtension(path);
+    int format;
+    uint8_t header[SPXI_HEADER_SIZE];
+    FILE* file = fopen(path, "rb");
+
+    if (!file) {
+        fprintf(stderr, "spximg could not open file: %s\n", path);
+        return SPXI_FORMAT_NULL;
+    }
+
+    fread(header, SPXI_HEADER_SIZE, sizeof(uint8_t), file);
+    fclose(file);
+    
+    format = spxParseExtension(path);
     if ((format == SPXI_FORMAT_PNG && spxParseHeaderPng(header)) ||
         (format == SPXI_FORMAT_JPEG && spxParseHeaderJpeg(header)) ||
         (format == SPXI_FORMAT_GIF && spxParseHeaderGif(header)) ||
         (format == SPXI_FORMAT_PNM && spxParseHeaderPnm(header))) {
         return format;
     }
+
     return spxParseHeader(header);
 }
 
@@ -548,7 +565,6 @@ int spxImageSavePnm(const Img2D img, const char* path)
         return EXIT_FAILURE;
     }
 
-
     fprintf(file, "P6 %d %d 255\n", img.width, img.height);
     fwrite(img.pixbuf, img.width * img.height, img.channels, file);
     return fclose(file);
@@ -558,49 +574,21 @@ int spxImageSavePnm(const Img2D img, const char* path)
 
 /* Generic Saving and Loading */
 
-static Img2D spxImageLoadGuess(const char* path, const uint8_t* header)
+Img2D spxImageLoad(const char* path)
 {
+    int format;
     Img2D image = {NULL, 0, 0, 0};
-
-    switch (spxParseHeader(header)) {
+    
+    format = spxParseFormat(path);
+    switch (format) {
         case SPXI_FORMAT_PNG: image = spxImageLoadPng(path); break;
         case SPXI_FORMAT_JPEG: image = spxImageLoadJpeg(path); break;
         /* case SPXI_FORMAT_GIF: image = spxImageLoadGif(path); break; */
         case SPXI_FORMAT_PNM: image = spxImageLoadPnm(path); break;
-        default: fprintf(
-            stderr, 
-            "spximg could not recognize image format of file: '%s'\n", 
-            path
-        );
+        case SPXI_FORMAT_UNKNOWN: fprintf(stderr, "Unknown format: %s\n", path);
     }
 
     return image;
-}
-
-Img2D spxImageLoad(const char* path)
-{
-    int format;
-    uint8_t header[8];
-    
-    FILE* file = fopen(path, "rb");
-    if (!file) {
-        Img2D image = {NULL, 0, 0, 0};
-        fprintf(stderr, "spximg could not open file: %s\n", path);
-        return image;
-    }
-
-    fread(header, 8, sizeof(uint8_t), file);
-    fclose(file);
-
-    format = spxParseFormat(path, header);
-    switch (format) {
-        case SPXI_FORMAT_PNG: return spxImageLoadPng(path);
-        case SPXI_FORMAT_JPEG: return spxImageLoadJpeg(path);
-        /* case SPXI_FORMAT_GIF: return spxImageLoadGif(path); */
-        case SPXI_FORMAT_PNM: return spxImageLoadPnm(path);
-    }
-
-    return spxImageLoadGuess(path, header);
 }
 
 int spxImageSave(const Img2D image, const char* path)
@@ -612,7 +600,7 @@ int spxImageSave(const Img2D image, const char* path)
         case SPXI_FORMAT_PNM: return spxImageSavePnm(image, path);
     }
 
-    fprintf(stderr, "spximg only supports saving .png, .jpeg, .gif and .ppm files\n");
+    fprintf(stderr, "spximg only supports saving .png, .jpeg, .gif and .pnm files\n");
     return EXIT_FAILURE;
 }
 

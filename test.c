@@ -34,13 +34,15 @@ const char* spxImageColorTypeString(int colorType)
 
 int main(const int argc, const char** argv)
 {
+    int format;
     Img2D image, img;
     if (argc < 2) {
         fprintf(stderr, "%s: missing input argument\n", argv[0]);
         return 1;
     }
 
-    image = spxImageLoadPng(argv[1]);
+    format = spxParseFormat(argv[1]);
+    image = spxImageLoad(argv[1]);
     if (!image.pixbuf) {
         fprintf(stderr, "%s: could not load file: %s\n", argv[0], argv[1]);
         return 2;
@@ -50,14 +52,14 @@ int main(const int argc, const char** argv)
         stdout, 
         "file: '%s'\nformat: %s\nwidth: %d\nheight: %d\nchannels: %d\n",
         argv[1],
-        "PNG",
+        spxFormatName(format),
         image.width,
         image.height,
         image.channels
     );
 
     img = spxImageCreate(400, 300, 1);
-    spxImageSavePng(img, "images/bmp.png");
+    spxImageSave(img, "images/bmp.png");
 
     if (image.channels == 4) {
         Img2D tmp = spxImageReshape4to3(image);
