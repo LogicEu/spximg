@@ -46,9 +46,9 @@ GIF file formats.
 
 typedef struct Img2D {
     uint8_t* pixbuf;
-    int channels;
     int width;
     int height;
+    int channels;
 } Img2D;
 
 Img2D spxImageCreate(int width, int height, int channels);

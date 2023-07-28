@@ -3,75 +3,52 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-const char* spxFormatName(int format)
+const char* spxImageFormatName(int format)
 {
     static const char* table[] = {"Unknown", "PNG", "JPEG", "GIF", "PPM"};
     return table[format > 4 ? 0 : format];
 }
 
-const char* spxImageChannelsString(int colorType)
+const char* spxImageColorName(int channels)
 {
-    switch (colorType) {
-        case SPXI_COLOR_RGBA: return "RGBA";
-        case SPXI_COLOR_RGB: return "RGB";
-        case SPXI_COLOR_GRAY_ALPHA: return "GrayAlpha";
-        case SPXI_COLOR_GRAY: return "Gray";                        
-    }
-    return "Unknown";
-}
 
-const char* spxImageColorTypeString(int colorType)
-{
-    switch (colorType) {
-        case PNG_COLOR_TYPE_RGBA: return "RGBA";
-        case PNG_COLOR_TYPE_RGB: return "RGB";
-        case PNG_COLOR_TYPE_GRAY_ALPHA: return "GrayAlpha";
-        case PNG_COLOR_TYPE_GRAY: return "Gray";                        
-        case PNG_COLOR_TYPE_PALETTE: return "Palette";
-    }
-    return "Unknown";
+    static const char* table[] = {"Unknown", "Gray", "GrayAlpha", "RGB", "RGBA"};
+    return table[(channels < 0 || channels > 4) ? 0 : channels];
 }
 
 int main(const int argc, const char** argv)
 {
     int format;
-    Img2D image, img;
+    Img2D image;
+
     if (argc < 2) {
         fprintf(stderr, "%s: missing input argument\n", argv[0]);
-        return 1;
+        return EXIT_FAILURE;
     }
 
     format = spxParseFormat(argv[1]);
+    if (format == SPXI_FORMAT_NULL) {
+        fprintf(stderr, "%s: could not open file: %s\n", argv[0], argv[1]);
+        return EXIT_FAILURE;
+    }
+
     image = spxImageLoad(argv[1]);
     if (!image.pixbuf) {
-        fprintf(stderr, "%s: could not load file: %s\n", argv[0], argv[1]);
-        return 2;
+        fprintf(stderr, "%s: could not interpret file: %s\n", argv[0], argv[1]);
+        return EXIT_FAILURE;
     }
 
     fprintf(
         stdout, 
-        "file: '%s'\nformat: %s\nwidth: %d\nheight: %d\nchannels: %d\n",
+        "file: '%s'\nformat: %s\nwidth: %d\nheight: %d\nchannels: %d - '%s'\n",
         argv[1],
-        spxFormatName(format),
+        spxImageFormatName(format),
         image.width,
         image.height,
-        image.channels
+        image.channels,
+        spxImageColorName(image.channels)
     );
-
-    img = spxImageCreate(400, 300, 1);
-    spxImageSave(img, "images/bmp.png");
-
-    if (image.channels == 4) {
-        Img2D tmp = spxImageReshape4to3(image);
-        spxImageFree(&image);
-        image = tmp;
-    } else if (image.channels < 3) {
-        fprintf(stderr, "Image channels is less than 3!\n");
-        spxImageFree(&image);
-        return EXIT_FAILURE;
-    }
-
-    spxImageSave(image, "images/image.ppm");
+    
     spxImageFree(&image);
     return 0;
 }
