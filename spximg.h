@@ -680,19 +680,11 @@ int spxImageSaveJpeg(const Img2D img, const char* path, const int quality)
     struct jpeg_compress_struct info;
     struct jpeg_error_mgr err;
 
-    /* REPLACE WITH spxImageReshape(); */
     if (img.channels == 2 || img.channels == 4) {
-        int ret;
-        Img2D tmp;
-        
-        switch (img.channels) {
-            case 2: tmp = spxImageReshape2to1(img); break;
-            case 4: tmp = spxImageReshape4to3(img); break;
-        }
-        
-        ret = spxImageSaveJpeg(tmp, path, quality);
+        Img2D tmp = spxImageReshape(img, img.channels - 1);
+        i = spxImageSaveJpeg(tmp, path, quality);
         spxImageFree(&tmp);
-        return ret;
+        return i;
     }
 
     assert(img.channels == 1 || img.channels == 3);
@@ -756,7 +748,17 @@ Img2D spxImageLoadPnm(const char* path)
 
 int spxImageSavePnm(const Img2D img, const char* path)
 {
-    FILE* file = fopen(path, "wb");
+    FILE* file;
+
+    if (img.channels != 3) {
+        int ret;
+        Img2D tmp = spxImageReshape(img, 3);
+        ret = spxImageSavePnm(tmp, path);
+        spxImageFree(&tmp);
+        return ret;
+    }
+
+    file = fopen(path, "wb");
     if (!file) {
         fprintf(stderr, "spximg could not open filw for writing: %s\n", path);
         return EXIT_FAILURE;
@@ -818,14 +820,15 @@ Img2D spxImageCreate(int width, int height, int channels)
 
 Img2D spxImageCopy(const Img2D img)
 {
-    size_t size;
     Img2D image;
+    size_t size = img.width * img.height * img.channels;
+    
     image.width = img.width;
     image.height = img.height;
     image.channels = img.channels;
-    size = img.width * img.height * img.channels;
     image.pixbuf = malloc(size);
     memcpy(image.pixbuf, img.pixbuf, size);
+    
     return image;
 }
 
