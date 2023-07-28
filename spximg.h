@@ -201,23 +201,91 @@ static int spxParseFormat(const char* path)
 
 /* Image Reshape Implementation */
 
+static Img2D spxImageReshape1to4(const Img2D img)
+{
+	Img2D ret;
+	int i, size = img.width * img.height;
+    assert(img.channels == 1);
+
+	ret.channels = 4;
+	ret.width = img.width;
+	ret.height = img.height;
+	ret.pixbuf = (uint8_t*)malloc(size << 2);
+
+    for (i = 0; i < size; ++i) {
+        uint8_t* dst = ret.pixbuf + (i << 2);
+        dst[1] = img.pixbuf[i];
+        dst[2] = img.pixbuf[i];
+        dst[3] = img.pixbuf[i];
+        dst[3] = SPXI_PADDING;
+	}
+
+	return ret;
+}
+
+static Img2D spxImageReshape2to4(const Img2D img)
+{ 
+	Img2D ret;
+	int i, size = img.width * img.height;
+    assert(img.channels == 2);
+
+	ret.channels = 4;
+	ret.width = img.width;
+	ret.height = img.height;
+	ret.pixbuf = (uint8_t*)malloc(size << 2);
+
+    for (i = 0; i < size; ++i) {
+        uint8_t* src = img.pixbuf + (i << 1);
+        uint8_t* dst = ret.pixbuf + (i << 2);
+        dst[0] = src[0];
+        dst[1] = src[0];
+        dst[2] = src[0];
+        dst[3] = src[1];
+	}
+
+    return ret;
+}
+
+static Img2D spxImageReshape3to4(const Img2D img)
+{
+	Img2D ret;
+	int i, size = img.width * img.height;
+    assert(img.channels == 3);
+
+	ret.channels = 4;
+	ret.width = img.width;
+	ret.height = img.height;
+	ret.pixbuf = (uint8_t*)malloc(size << 2);
+
+    for (i = 0; i < size; ++i) {
+        uint8_t* src = img.pixbuf + i * 3;
+        uint8_t* dst = ret.pixbuf + (i << 2);
+        dst[0] = src[0];
+        dst[1] = src[1];
+        dst[2] = src[2];
+        dst[3] = SPXI_PADDING;
+	}
+
+	return ret;
+}
+
 static Img2D spxImageReshape4to3(const Img2D img)
 {
     Img2D ret;
-    int i, inStride = img.width * 4, outStride = img.width * 3;
+	int i, size = img.width * img.height;
     assert(img.channels == 4);
 
+    ret.channels = 3;
     ret.width = img.width;
     ret.height = img.height;
-    ret.channels = 3;
-    ret.pixbuf = (uint8_t*)malloc(img.height * outStride);
+    ret.pixbuf = (uint8_t*)malloc(size * 3);
 
-    for (i = 0; i < img.height; ++i) {
-        memcpy(
-            ret.pixbuf + i * outStride,
-            img.pixbuf + i * inStride,
-            3
-        );
+    for (i = 0; i < size; ++i) {
+        uint8_t* src = img.pixbuf + (i << 2);
+        uint8_t* dst = ret.pixbuf + i * 3;
+        dst[0] = src[0];
+        dst[1] = src[1];
+        dst[2] = src[2];
     }
 
     return ret;
@@ -226,24 +294,20 @@ static Img2D spxImageReshape4to3(const Img2D img)
 static Img2D spxImageReshape2to3(const Img2D img)
 { 
     Img2D ret;
-    uint8_t* px, p;
-    int i, j, x, y, stride = img.width * 3;
-    assert(img.channels == 1);
+    int i, size = img.width * img.height;
+    assert(img.channels == 2);
 
+    ret.channels = 3;
     ret.width = img.width;
     ret.height = img.height;
-    ret.channels = 3;
-    ret.pixbuf = (uint8_t*)malloc(img.height * stride);
+    ret.pixbuf = (uint8_t*)malloc(size * 3);
 
-    for (y = 0, i = 0; y < img.height; ++y) {
-        for (x = 0; x < img.width; ++x) {
-            j = i << 1;
-            p = (uint8_t)((int)img.pixbuf[j] * (int)img.pixbuf[j + 1] / 255);
-            px = ret.pixbuf + i++ * stride;
-            px[0] = p;
-            px[1] = p;
-            px[2] = p;
-        }
+    for (i = 0; i < size; ++i) {
+        uint8_t p = img.pixbuf[i << 1];
+        uint8_t* dst = img.pixbuf + i * 3;
+        dst[0] = p;
+        dst[1] = p;
+        dst[2] = p;
     }
 
     return ret;  
@@ -252,21 +316,19 @@ static Img2D spxImageReshape2to3(const Img2D img)
 static Img2D spxImageReshape1to3(const Img2D img)
 {
     Img2D ret;
-    int i, x, y, stride = img.width * 3;
+    int i, size = img.width * img.height;
     assert(img.channels == 1);
 
+    ret.channels = 3;
     ret.width = img.width;
     ret.height = img.height;
-    ret.channels = 3;
-    ret.pixbuf = (uint8_t*)malloc(img.height * stride);
+    ret.pixbuf = (uint8_t*)malloc(size * 3);
 
-    for (y = 0, i = 0; y < img.height; ++y) {
-        for (x = 0; x < img.width; ++x) {
-            uint8_t* px = ret.pixbuf + i++ * stride;
-            px[0] = img.pixbuf[i];
-            px[1] = img.pixbuf[i];
-            px[2] = img.pixbuf[i];
-        }
+    for (i = 0; i < size; ++i) {
+        uint8_t* dst = ret.pixbuf + i * 3;
+        dst[0] = img.pixbuf[i];
+        dst[1] = img.pixbuf[i];
+        dst[2] = img.pixbuf[i];
     }
 
     return ret;
@@ -275,22 +337,19 @@ static Img2D spxImageReshape1to3(const Img2D img)
 static Img2D spxImageReshape4to2(const Img2D img)
 {
     Img2D ret;
-    int i, j, x, y;
+    int i, size = img.width * img.height;
     assert(img.channels == 4);
 
+    ret.channels = 2;
     ret.width = img.width;
     ret.height = img.height;
-    ret.channels = 2;
-    ret.pixbuf = (uint8_t*)malloc(img.height * img.width << 1);
+    ret.pixbuf = (uint8_t*)malloc(size << 1);
 
-    for (y = 0, i = 0; y < img.height; ++y) {
-        for (x = 0; x < img.width; ++x) {
-            uint8_t* px = img.pixbuf + i * img.channels;
-            j = i << 1;
-            ret.pixbuf[j] = (px[0] + px[1] + px[2]) / 3;
-            ret.pixbuf[j + 1] = px[4];
-            ++i;
-        }
+    for (i = 0; i < size; ++i) {
+        uint8_t* src = img.pixbuf + (i << 2);
+        uint8_t* dst = ret.pixbuf + (i << 1);
+        dst[0] = (uint8_t)(((int)src[0] + (int)src[1] + (int)src[2]) / 3);
+        dst[1] = src[4];
     }
 
     return ret;
@@ -299,22 +358,19 @@ static Img2D spxImageReshape4to2(const Img2D img)
 static Img2D spxImageReshape3to2(const Img2D img)
 {
     Img2D ret;
-    int i, j, x, y;
+    int i, size = img.width * img.height;
     assert(img.channels == 3);
 
+    ret.channels = 2;
     ret.width = img.width;
     ret.height = img.height;
-    ret.channels = 2;
-    ret.pixbuf = (uint8_t*)malloc(img.height * img.width << 1);
+    ret.pixbuf = (uint8_t*)malloc(size << 1);
 
-    for (y = 0, i = 0; y < img.height; ++y) {
-        for (x = 0; x < img.width; ++x) {
-            uint8_t* px = img.pixbuf + i * img.channels;
-            j = i << 1;
-            ret.pixbuf[j] = (px[0] + px[1] + px[2]) / 3;
-            ret.pixbuf[j + 1] = SPXI_PADDING;
-            ++i;
-        }
+    for (i = 0; i < size; ++i) {
+        uint8_t* src = img.pixbuf + i * 3;
+        uint8_t* dst = ret.pixbuf + (i << 1);
+        dst[0] = (uint8_t)(((int)src[0] + (int)src[1] + (int)src[2]) / 3);
+        dst[1] = SPXI_PADDING;
     }
 
     return ret;
@@ -323,20 +379,18 @@ static Img2D spxImageReshape3to2(const Img2D img)
 static Img2D spxImageReshape1to2(const Img2D img)
 {
     Img2D ret;
-    int i, j, x, y;
+    int i, size = img.width * img.height;
     assert(img.channels == 1);
 
+    ret.channels = 2;
     ret.width = img.width;
     ret.height = img.height;
-    ret.channels = 2;
-    ret.pixbuf = (uint8_t*)malloc(img.height * img.width << 1);
+    ret.pixbuf = (uint8_t*)malloc(size << 1);
 
-    for (y = 0, i = 0; y < img.height; ++y) {
-        for (x = 0; x < img.width; ++x) {
-            j = i << 1;
-            ret.pixbuf[j] = img.pixbuf[i++];
-            ret.pixbuf[j + 1] = SPXI_PADDING;
-        }
+    for (i = 0; i < size; ++i) {
+        uint8_t* dst = ret.pixbuf + (i << 1);
+        dst[0] = img.pixbuf[i];
+        dst[1] = SPXI_PADDING;
     }
 
     return ret;
@@ -345,19 +399,17 @@ static Img2D spxImageReshape1to2(const Img2D img)
 static Img2D spxImageReshape4or3to1(const Img2D img)
 {
     Img2D ret;
-    int i, x, y;
+    int i, size = img.width * img.height;
     assert(img.channels == 4 || img.channels == 3);
 
+    ret.channels = 1;
     ret.width = img.width;
     ret.height = img.height;
-    ret.channels = 1;
-    ret.pixbuf = (uint8_t*)malloc(img.height * img.width);
+    ret.pixbuf = (uint8_t*)malloc(size);
 
-    for (y = 0, i = 0; y < img.height; ++y) {
-        for (x = 0; x < img.width; ++x) {
-            uint8_t* px = img.pixbuf + i * img.channels;
-            ret.pixbuf[i++] = (px[0] + px[1] + px[2]) / 3;
-        }
+    for (i = 0; i < size; ++i) {
+        uint8_t* src = img.pixbuf + i * img.channels;
+        ret.pixbuf[i] = (uint8_t)(((int)src[0] + (int)src[1] + (int)src[2]) / 3);
     }
 
     return ret;
@@ -366,19 +418,16 @@ static Img2D spxImageReshape4or3to1(const Img2D img)
 static Img2D spxImageReshape2to1(const Img2D img)
 {
     Img2D ret;
-    int i, x, y;
-    const int stride = img.width * img.channels;
-    
+    int i, size = img.width * img.height;
     assert(img.channels == 2);
+    
+    ret.channels = 1;
     ret.width = img.width;
     ret.height = img.height;
-    ret.channels = 1;
-    ret.pixbuf = (uint8_t*)malloc(img.width * img.height);
-
-    for (y = 0, i = 0; y < img.height; ++y) {
-        for (x = 0; x < img.width; ++x, ++i) {
-            ret.pixbuf[i * img.width] = img.pixbuf[i * stride];
-        }
+    ret.pixbuf = (uint8_t*)malloc(size);
+    
+    for (i = 0; i < size; ++i) {
+        ret.pixbuf[i] = img.pixbuf[i << 1];
     }
 
     return ret;
@@ -386,47 +435,25 @@ static Img2D spxImageReshape2to1(const Img2D img)
 
 Img2D spxImageReshape(const Img2D img, const int channels)
 {
-    Img2D ret = {NULL, 0, 0, 0};
+    static Img2D (*spxImageReshapeFunctions[4][4])(const Img2D) = {
+        {&spxImageCopy, &spxImageReshape1to2, &spxImageReshape1to3, &spxImageReshape1to4},
+        {&spxImageReshape2to1, &spxImageCopy, &spxImageReshape2to3, &spxImageReshape2to4},
+        {&spxImageReshape4or3to1, &spxImageReshape3to2, &spxImageCopy, &spxImageReshape3to4},
+        {&spxImageReshape4or3to1, &spxImageReshape4to2, &spxImageReshape4to3, &spxImageCopy}
+    };
 
-    assert(img.channels > 0 && img.channels <= 4);
-    if (img.channels == channels) {
-        return spxImageCopy(img);
+    if (img.channels <= 0 || img.channels > 4 || channels <= 0 || channels > 4) {
+        Img2D ret = {NULL, 0, 0, 0};
+        fprintf(
+            stderr, 
+            "spximg does not support reshape from %d to %d channels\n",
+            img.channels,
+            channels
+        );
+        return ret;
     }
 
-    switch (channels) {
-    case 1:
-        switch (img.channels) {
-        case 2: ret = spxImageReshape2to1(img); break;
-        case 3: 
-        case 4: ret = spxImageReshape4or3to1(img);
-        }
-        break;
-    case 2:
-        switch (img.channels) {
-        case 1: ret = spxImageReshape1to2(img); break;
-        case 3: ret = spxImageReshape3to2(img); break;
-        case 4: ret = spxImageReshape4to2(img); break;
-        }
-        break;
-    case 3:
-        switch (img.channels) {
-        case 1: ret = spxImageReshape1to3(img); break;
-        case 2: ret = spxImageReshape2to3(img); break;
-        case 4: ret = spxImageReshape4to3(img); break;
-        }
-        break;
-    case 4:
-        switch (img.channels) {
-        case 1: ret = spxImageReshape1to4(img); break;
-        case 2: ret = spxImageReshape2to4(img); break;
-        case 3: ret = spxImageReshape3to4(img); break;
-        }
-        break;
-    default:
-        fprintf(stderr, "spximg cannot reshape to channel count: %d\n", channels);
-    }
-
-    return ret;
+    return spxImageReshapeFunctions[img.channels][channels](img);
 }
 
 /* Image Formats Saver and Loaders */
