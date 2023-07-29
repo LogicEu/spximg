@@ -621,7 +621,7 @@ int spxImageSavePng(const Img2D img, const char* path)
 Img2D spxImageLoadJpeg(const char* path)
 {
     int i;
-    void* fbuffer;
+    uint8_t* fbuffer;
 	size_t fsize, stride;
 	Img2D img = {NULL, 0, 0, 0};
     
@@ -636,7 +636,7 @@ Img2D spxImageLoadJpeg(const char* path)
 
     fseek(file, 0, SEEK_END);
     fsize = ftell(file);
-    fbuffer = malloc(fsize);
+    fbuffer = (uint8_t*)malloc(fsize);
     
     fseek(file, 0, SEEK_SET);
 	fread(fbuffer, fsize, sizeof(uint8_t), file);
@@ -812,7 +812,7 @@ Img2D spxImageCreate(int width, int height, int channels)
     image.height = height;
     image.channels = channels;
     size = width * height * channels;
-    image.pixbuf = malloc(size);
+    image.pixbuf = (uint8_t*)malloc(size);
     memset(image.pixbuf, SPXI_PADDING, size);
     return image;
 }
@@ -825,7 +825,7 @@ Img2D spxImageCopy(const Img2D img)
     image.width = img.width;
     image.height = img.height;
     image.channels = img.channels;
-    image.pixbuf = malloc(size);
+    image.pixbuf = (uint8_t*)malloc(size);
     memcpy(image.pixbuf, img.pixbuf, size);
     
     return image;

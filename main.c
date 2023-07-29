@@ -106,7 +106,7 @@ static int spximgCheckArgs(
 
 int main(const int argc, const char** argv)
 {
-    int i, format;
+    int i, format = 0;
     const char* path = NULL;
     Img2D image = {NULL, 0, 0, 0};
 
