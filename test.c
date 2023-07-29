@@ -88,26 +88,30 @@ int main(const int argc, const char** argv)
                 return spximgHelp(argv[0]);
             } else if ((cmd[0] == 'h' && !cmd[1]) || !strcmp(cmd, "-version")) {
                 return spximgVersion(argv[0]);
-            } else if (cmd[0] == 'd' && !cmd[1] && 
-                !spximgCheckImage(image.pixbuf, path, argv[0], argv[i])) {
-                spximgImageInfo(image, path, format);
-            } else if (cmd[0] == 'i' && !cmd[1] &&
-                !spximgCheckImage(image.pixbuf, path, argv[0], argv[i])) {
-                spxImageSave(image, path);
-            } else if (cmd[0] == 'o' && !cmd[1] &&
-                !spximgCheckImage(image.pixbuf, path, argv[0], argv[i]) &&
-                !spximgCheckArgs(argc, i, argv[0], argv[i])) {
-                spxImageSave(image, argv[++i]);
-            } else if (cmd[0] == 'n' && !cmd[1] && 
-                !spximgCheckImage(image.pixbuf, path, argv[0], argv[i]) &&
-                !spximgCheckArgs(argc, i, argv[0], argv[i])) {
-                Img2D tmp = spxImageReshape(image, atoi(argv[++i]));
-                if (tmp.pixbuf) {
-                    spxImageFree(&image);
-                    image = tmp;
+            } else if (cmd[0] == 'd' && !cmd[1]) { 
+                if (!spximgCheckImage(image.pixbuf, path, argv[0], argv[i])) {
+                    spximgImageInfo(image, path, format);
+                }
+            } else if (cmd[0] == 'i' && !cmd[1]) {
+                if (!spximgCheckImage(image.pixbuf, path, argv[0], argv[i])) {
+                    spxImageSave(image, path);
+                }
+            } else if (cmd[0] == 'o' && !cmd[1]) {
+                if (!spximgCheckImage(image.pixbuf, path, argv[0], argv[i]) &&
+                    !spximgCheckArgs(argc, i, argv[0], argv[i])) {
+                    spxImageSave(image, argv[++i]);
+                }
+            } else if (cmd[0] == 'n' && !cmd[1]) {
+                if (!spximgCheckImage(image.pixbuf, path, argv[0], argv[i]) &&
+                    !spximgCheckArgs(argc, i, argv[0], argv[i])) {
+                    Img2D tmp = spxImageReshape(image, atoi(argv[++i]));
+                    if (tmp.pixbuf) {
+                        spxImageFree(&image);
+                        image = tmp;
+                    }
                 }
             } else {
-                fprintf(stderr, "%s: unknown option '%s'\n", argv[0], argv[i]);
+                fprintf(stderr, "%s: unknown option %s\n", argv[0], argv[i]);
             }
         } else {
             path = argv[i];

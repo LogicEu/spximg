@@ -444,14 +444,12 @@ Img2D spxImageReshape(const Img2D img, const int channels)
 {
     Img2D ret = {NULL, 0, 0, 0};
     if (img.channels > 0 && img.channels <= 4 && channels > 0 && channels <= 4) {
-        return spxImageReshapeFunctions[img.channels][channels](img);
+        return spxImageReshapeFunctions[img.channels - 1][channels - 1](img);
     }
 
     fprintf(
-        stderr, 
-        "spximg does not support reshape from %d to %d channels\n",
-        img.channels,
-        channels
+        stderr, "spximg does not support reshape from %d to %d channels\n",
+        img.channels, channels
     );
 
     return ret;
