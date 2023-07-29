@@ -433,27 +433,28 @@ static Img2D spxImageReshape2to1(const Img2D img)
     return ret;
 }
 
+static Img2D (*spxImageReshapeFunctions[4][4])(const Img2D) = {
+    {&spxImageCopy, &spxImageReshape1to2, &spxImageReshape1to3, &spxImageReshape1to4},
+    {&spxImageReshape2to1, &spxImageCopy, &spxImageReshape2to3, &spxImageReshape2to4},
+    {&spxImageReshape4or3to1, &spxImageReshape3to2, &spxImageCopy, &spxImageReshape3to4},
+    {&spxImageReshape4or3to1, &spxImageReshape4to2, &spxImageReshape4to3, &spxImageCopy}
+};
+
 Img2D spxImageReshape(const Img2D img, const int channels)
 {
-    static Img2D (*spxImageReshapeFunctions[4][4])(const Img2D) = {
-        {&spxImageCopy, &spxImageReshape1to2, &spxImageReshape1to3, &spxImageReshape1to4},
-        {&spxImageReshape2to1, &spxImageCopy, &spxImageReshape2to3, &spxImageReshape2to4},
-        {&spxImageReshape4or3to1, &spxImageReshape3to2, &spxImageCopy, &spxImageReshape3to4},
-        {&spxImageReshape4or3to1, &spxImageReshape4to2, &spxImageReshape4to3, &spxImageCopy}
-    };
-
-    if (img.channels <= 0 || img.channels > 4 || channels <= 0 || channels > 4) {
-        Img2D ret = {NULL, 0, 0, 0};
-        fprintf(
-            stderr, 
-            "spximg does not support reshape from %d to %d channels\n",
-            img.channels,
-            channels
-        );
-        return ret;
+    Img2D ret = {NULL, 0, 0, 0};
+    if (img.channels > 0 && img.channels <= 4 && channels > 0 && channels <= 4) {
+        return spxImageReshapeFunctions[img.channels][channels](img);
     }
 
-    return spxImageReshapeFunctions[img.channels][channels](img);
+    fprintf(
+        stderr, 
+        "spximg does not support reshape from %d to %d channels\n",
+        img.channels,
+        channels
+    );
+
+    return ret;
 }
 
 /* Image Formats Saver and Loaders */
@@ -490,13 +491,11 @@ static int spxPngChannelsToColorType(int channels)
 
 Img2D spxImageLoadPng(const char* path)
 {
-    int i;
-    size_t rowSize;
+    int i, stride;
     Img2D img = {NULL, 0, 0, 0};
-    png_byte bitDepth, colorType;
+    uint8_t **rows, bitDepth, colorType;
     png_structp png;
     png_infop info;
-    png_bytep* rows;
     
     FILE *file = fopen(path, "rb");
     if (!file) {
@@ -547,14 +546,14 @@ Img2D spxImageLoadPng(const char* path)
     png_read_update_info(png, info);
     colorType = png_get_color_type(png, info);
 
-    rowSize = img.channels * img.width;
-    assert(rowSize == png_get_rowbytes(png, info));
+    stride = img.channels * img.width;
+    assert(stride == (int)png_get_rowbytes(png, info));
 
-    rows = (png_bytep*)malloc(img.height * sizeof(png_bytep));
-    img.pixbuf = (uint8_t*)malloc(img.height * rowSize);
+    rows = (uint8_t**)malloc(img.height * sizeof(uint8_t*));
+    img.pixbuf = (uint8_t*)malloc(img.height * stride);
     
     for (i = 0; i < img.height; i++) {
-        rows[i] = img.pixbuf + i * rowSize;
+        rows[i] = img.pixbuf + i * stride;
     }
 
     png_read_image(png, rows);
@@ -566,10 +565,10 @@ Img2D spxImageLoadPng(const char* path)
 
 int spxImageSavePng(const Img2D img, const char* path) 
 {
-    int i, colorType;
-    png_infop info;
+    int i, stride;
+    uint8_t **rows, colorType;
     png_structp png;
-    png_bytep* rows;
+    png_infop info;
 
     FILE* file = fopen(path, "wb");
     if (!file) {
@@ -597,9 +596,11 @@ int spxImageSavePng(const Img2D img, const char* path)
         PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT
     );
 
-    rows = (png_bytep*)malloc(img.height * sizeof(png_bytep));
+    stride = img.width * img.channels;
+    rows = (uint8_t**)malloc(img.height * sizeof(uint8_t*));
+    
     for (i = 0; i < img.height; i++) {
-        rows[i] = img.pixbuf + i * img.width * img.channels;
+        rows[i] = img.pixbuf + i * stride;
     }
 
     png_write_info(png, info);
