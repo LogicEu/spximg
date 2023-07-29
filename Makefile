@@ -1,7 +1,7 @@
 # spximg Makefile
 
-SRC=test.c
-EXE=spxitest
+SRC=main.c
+EXE=spximg
 HEADER=spximg.h
 SCRIPT=build.sh
 

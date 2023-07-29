@@ -1,3 +1,31 @@
+/*
+
+Copyright (c) 2023 Eugenio Arteaga A.
+
+Permission is hereby granted, free of charge, to any 
+person obtaining a copy of this software and associated 
+documentation files (the "Software"), to deal in the 
+Software without restriction, including without limitation
+the rights to use, copy, modify, merge, publish, distribute,
+sublicense, and/or sell copies of the Software, and to 
+permit persons to whom the Software is furnished to do so,
+subject to the following conditions:
+
+The above copyright notice and this permission notice 
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY
+KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
+PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS
+OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+*/
+
 #define SPXI_APPLICATION
 #include <spximg.h>
 #include <stdlib.h>
@@ -31,22 +59,23 @@ static int spximgVersion(const char* exestr)
 static int spximgHelp(const char* exestr)
 {
     fprintf(stdout, "%s usage:\n", exestr);
-    fprintf(stdout, "<image.*>\t: Load image file (.png, .jpeg or .ppm)\n");
-    fprintf(stdout, "-o <image.*>\t: Save image file (.png, .jpeg or .ppm)\n");
-    fprintf(stdout, "-d\t: Display image information\n");
-    fprintf(stdout, "-i\t: Save output image file to same path as input image file\n");
+    fprintf(stdout, "<image.*>\t: Load <image.*> file (.png, .jpeg or .ppm)\n");
+    fprintf(stdout, "-o <image.*>\t: Save <image.*> file (.png, .jpeg or .ppm)\n");
+    fprintf(stdout, "-d\t\t: Display image information\n");
+    fprintf(stdout, "-i\t\t: Save output image file to same path as input file\n");
     fprintf(stdout, "-n <int>\t: Reshape image to have <int> number of channels\n");
     fprintf(stdout, "-h, --help:\t: Display usage and available commands\n");
-    fprintf(stdout, "-v, --version:\t: Show version information\n");
+    fprintf(stdout, "-v, --version:\t: Display version information\n");
     return EXIT_SUCCESS;
 }
 
 static int spximgImageInfo(const Img2D image, const char* path, int format)
 {
+    static const char* sep = "-----------------------------------------------------\n";
     return fprintf(
-        stdout, "file: '%s'\nformat: %s\nwidth: %d\nheight: %d\n"
+        stdout, "%sfile: '%s'\nformat: %s\nwidth: %d\nheight: %d\n"
         "channels: %d - '%s'\n",
-        path, spxImageFormatName(format), image.width, image.height, 
+        sep, path, spxImageFormatName(format), image.width, image.height, 
         image.channels, spxImageColorName(image.channels)
     );
 }
@@ -86,7 +115,7 @@ int main(const int argc, const char** argv)
             const char* cmd = argv[i] + 1;
             if ((cmd[0] == 'h' && !cmd[1]) || !strcmp(cmd, "-help")) {
                 return spximgHelp(argv[0]);
-            } else if ((cmd[0] == 'h' && !cmd[1]) || !strcmp(cmd, "-version")) {
+            } else if ((cmd[0] == 'v' && !cmd[1]) || !strcmp(cmd, "-version")) {
                 return spximgVersion(argv[0]);
             } else if (cmd[0] == 'd' && !cmd[1]) { 
                 if (!spximgCheckImage(image.pixbuf, path, argv[0], argv[i])) {

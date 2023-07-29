@@ -1,7 +1,7 @@
 #!/bin/bash
 
-src=test.c
-exe=spxitest
+src=main.c
+exe=spximg
 header=spximg.h
 installpath=/usr/local/include
 
