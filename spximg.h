@@ -41,8 +41,8 @@ It supports loading PNG, JPEG and PPM file  formats. Instead
 of implenting PNG and JPEG from scratch, it uses libpng and 
 libjpeg to build a simple and easy interoperability layer
 across formats. It recognizes the image format by checking 
-file name extension and comparing file's content header bytes
-against each specification.
+file name extension and then comparing the file's header 
+bytes against each format specification.
 
 ****************************************************/
 
