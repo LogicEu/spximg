@@ -48,12 +48,17 @@ bytes against each format specification.
 
 #include <stdint.h>
 
+#ifndef IMG2D_TYPE_DEFINED
+#define IMG2D_TYPE_DEFINED
+
 typedef struct Img2D {
     uint8_t* pixbuf;
     int width;
     int height;
     int channels;
 } Img2D;
+
+#endif /* IMG2D_TYPE_DEFINED */
 
 Img2D spxImageCreate(int width, int height, int channels);
 Img2D spxImageLoad(const char* path);
