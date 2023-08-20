@@ -128,7 +128,7 @@ void spxImageFree(Img2D* image);
 #define spxParseHeaderPng(h) (!memcmp(h, "\211PNG\r\n\032\n", 8))
 #define spxParseHeaderJpeg(h) (h[0] == 0xFF && h[1] == 0xD8 && h[2] == 0xFF)
 #define spxParseHeaderGif(h) (!memcmp(h, "GIF87a", 6) || !memcmp(h, "GIF89a", 6))
-#define spxParseHeaderPpm(h) (!memcmp(h, "P6", 2) && isspace(h[2]))
+#define spxParseHeaderPpm(h) ((h[0] == 0x50 && (h[1] == 0x33 || h[1] == 0x36) && isspace(h[2])))
 
 static int spxStrcmpLower(const char* s1, const char* s2)
 {
@@ -728,23 +728,173 @@ int spxImageSaveJpeg(const Img2D img, const char* path, const int quality)
 #endif /* SPXI_NO_JPEG */
 #ifndef SPXI_NO_PPM
 
+#define LINESIZE 256
+
+static void spxImageLoadPpmNormalize(Img2D* img, const int bitdepth)
+{
+    int i, x, y, n;
+    Img2D buf = *img;
+    const int bitsize = 1 + (bitdepth > 255);
+    buf.pixbuf = (uint8_t*)malloc(buf.width * buf.height * 3);
+    
+    for (y = 0; y < buf.height; ++y) {
+        for (x = 0; x < buf.width; ++x) {
+            for (i = 0; i < 3; ++i) {
+                const int index = (((y * buf.width) + x) * 3 + i);
+                const uint8_t* p = img->pixbuf + index * bitsize;
+                n = bitsize == 2 ? (int)(*(uint16_t*)p) : (int)*p;
+                buf.pixbuf[index] = (uint8_t)(255 * n / bitdepth);
+            }
+        }
+    }
+
+    spxImageFree(img);
+    *img = buf;
+}
+
+static Img2D spxImageLoadPpm6(
+    FILE* file, const int width, const int height, const int bitdepth)
+{
+    Img2D image = {NULL, 0, 0, 3};
+    const int bitsize = 1 + (bitdepth > 255);
+    const size_t size = width * height * bitsize * 3;
+
+    image.width = width;
+    image.height = height;
+    image.pixbuf = (uint8_t*)malloc(size);
+    fread(image.pixbuf, size, sizeof(uint8_t), file);
+
+    if (bitdepth != 255) {
+        spxImageLoadPpmNormalize(&image, bitdepth);
+    }
+
+    return image;
+}
+
+static Img2D spxImageLoadPpm3(
+    FILE* file, char* line, const int width, const int height, const int bitdepth)
+{
+    static const char* div = " \t\n\r";
+    
+    Img2D image;
+    uint8_t* end, *p;
+    char *tok, *key = NULL;
+    const int bitsize = 1 + (bitdepth > 255);
+    const size_t size = width * height * bitsize * 3;
+
+    image.pixbuf = (uint8_t*)malloc(size);
+    image.width = width;
+    image.height = height;
+    image.channels = 3;
+    p = image.pixbuf;
+
+    for (end = p + size; p != end; p += bitsize) {
+        tok = strtok(key, div);
+        key = NULL;
+        if (!tok) {
+            if (!fgets(line, LINESIZE, file)) {
+                spxImageFree(&image);
+                return image;
+            }
+
+            p -= bitsize;
+            key = line;
+            continue;
+        }
+
+        printf("%s\n", tok);
+        if (bitsize == 2) {
+            uint16_t* P = (uint16_t*)p;
+            *P = (uint16_t)atoi(tok);
+        } else {
+            *p = (uint8_t)atoi(tok);
+        }
+    }
+
+    if (bitdepth != 255) {
+        spxImageLoadPpmNormalize(&image, bitdepth);
+    }
+
+    return image;
+}
+
 Img2D spxImageLoadPpm(const char* path)
 {
-    size_t size;
-    char header[256];
-    Img2D image = {NULL, 0, 0, 3};
+    static const char* div = " \t\n\r";
+    
+    int params[3], paramcount = 0;
+    char N, line[LINESIZE], *tok, *key = NULL;
+    Img2D image = {NULL, 0, 0, 0};
+    
     FILE* file = fopen(path, "rb");
     if (!file) {
         fprintf(stderr, "spximg could not open file: '%s'\n", path);
         return image;
     }
 
-    fgets(header, 256, file);
-    sscanf(header, "P6 %d %d 255", &image.width, &image.height);
-    size = image.width * image.height * image.channels;
-    image.pixbuf = (uint8_t*)malloc(size);
-    fread(image.pixbuf, size, sizeof(uint8_t), file);
+    if (!fgets(line, LINESIZE, file)) {
+        fprintf(stderr, "spximg could not parse a complete PPM in file: %s\n", path);
+        fclose(file);
+        return image;
+    }
+
+    if (line[0] != 0x50) {
+        fprintf(stderr, "spximg detected that file '%s' is not a PPM\n", path);
+        fclose(file);
+        return image;
+    }
     
+    N = line[1];
+    tok = strtok(line, div);
+    while (paramcount < 3) {
+        tok = strtok(key, div);
+        key = NULL;
+        if (!tok || tok[0] == '#') {
+            if (!fgets(line, LINESIZE, file)) {
+                fprintf(stderr, "spximg could not parse complete PPM in file: %s\n",
+                    path
+                );
+                fclose(file);
+                return image;
+            }
+            key = line;
+        } else if (!isdigit(tok[0])) {
+            fprintf(stderr, "spximg detected invalid token in PPM header: %s: %s\n",
+                path, tok
+            );
+            fclose(file);
+            return image;
+        } else {
+            params[paramcount++] = atoi(tok);
+        }
+    }
+
+    if (!params[0] || !params[1] || !params[2]) {
+        fprintf(stderr, "PPM file '%s' has zero value in width, height or bitdepth\n",
+            path
+        );
+        fclose(file);
+        return image;
+    }
+
+    printf("Width: %d\nHeight: %d\nBitdepth: %d\n", params[0], params[1], params[2]);
+    switch (N) {
+        case '3':
+            image = spxImageLoadPpm3(file, line, params[0], params[1], params[2]);
+            break;
+        case '6':
+            image = spxImageLoadPpm6(file, params[0], params[1], params[2]);
+            break;
+        default:
+            fprintf(stderr, "spximg does not support this kind of PPM: P%c\n", N);
+    }
+
+    if (!image.pixbuf) {
+        fprintf(stderr, "spximg detected that PPM file '%s' is incomplete or corrupted\n",
+            path
+        );
+    }
+
     fclose(file);
     return image;
 }

@@ -106,7 +106,7 @@ static int spximgCheckArgs(
 
 int main(const int argc, const char** argv)
 {
-    int i, format = 0;
+    int i, format = 0, status = EXIT_FAILURE;
     const char* path = NULL;
     Img2D image = {NULL, 0, 0, 0};
 
@@ -152,6 +152,9 @@ int main(const int argc, const char** argv)
             }
 
             image = spxImageLoad(path);
+            if (status) {
+                status = !image.pixbuf;
+            }
         }
     }
 
@@ -161,5 +164,5 @@ int main(const int argc, const char** argv)
     }
    
     spxImageFree(&image);
-    return EXIT_SUCCESS;
+    return status;
 }
