@@ -132,9 +132,8 @@ void spxImageFree(Img2D* image);
 
 static int spxStrcmpLower(const char* s1, const char* s2)
 {
-    int i;
-    for (i = 0; s1[i]; ++i) {
-        if (tolower(s1[i]) != s2[i]) {
+    while (*s1 && *s2) {
+        if (tolower(*s1++) != *s2++) {
             return 0;
         }
     }
@@ -730,11 +729,18 @@ int spxImageSaveJpeg(const Img2D img, const char* path, const int quality)
 
 #define LINESIZE 256
 
-static void spxImageLoadPbmNormalize(Img2D* img)
+static void spxImageLoadPbmNormalize(Img2D* img, int stride)
 {
-    int i;
-    for (i = img->width * img->height - 1; i >= 0; --i) {
-        img->pixbuf[i] = !((img->pixbuf[i / 8] >> (7 - (i % 8))) & 0x01) * 0xFF;
+    int x, y, i, j, dif;
+    stride <<= 3;
+    dif = stride - img->width;
+    i = img->height * img->width - 1;
+    for (y = img->height - 1; y >= 0; --y) {
+        j = (y + 1) * stride - dif - 1;
+        for (x = img->width - 1; x >= 0; --x) {
+            img->pixbuf[i] = !((img->pixbuf[j / 8] >> (7 - (j % 8))) & 0x01) * 0xFF;
+            --i, --j;
+        }
     }
 }
 
@@ -769,12 +775,18 @@ static Img2D spxImageLoadPnmBinary(FILE* file, const int width,
     image.width = width;
     image.height = height;
     image.channels = channels;
-    fread(image.pixbuf, bitdepth ? size : size / 8 + 1, sizeof(uint8_t), file);
 
     if (!bitdepth) {
-        spxImageLoadPbmNormalize(&image);
-    } else if (bitdepth != 0xFF) {
-        spxImageLoadPnmNormalize(&image, bitdepth);
+        int i, stride = (width >> 3) + !!(width % 8);
+        for (i = 0; i < image.height; ++i) {
+            fread(image.pixbuf + i * stride, stride, sizeof(uint8_t), file);
+        }
+        spxImageLoadPbmNormalize(&image, stride);
+    } else {
+        fread(image.pixbuf, size, sizeof(uint8_t), file);
+        if (bitdepth != 0xFF) {
+            spxImageLoadPnmNormalize(&image, bitdepth);
+        }
     }
 
     return image;
@@ -843,24 +855,24 @@ Img2D spxImageLoadPnm(const char* path)
     
     FILE* file = fopen(path, "rb");
     if (!file) {
-        fprintf(stderr, "spximg could not open file: '%s'\n", path);
+        fprintf(stderr, "spximg could not open file: %s\n", path);
         return image;
     }
 
     if (!fgets(line, LINESIZE, file)) {
-        fprintf(stderr, "spximg could not parse a complete PPM in file: %s\n", path);
-        goto spxImageLoadPpmEnd;
+        fprintf(stderr, "spximg could not parse file: %s\n", path);
+        goto spxImageLoadPnmEnd;
     }
 
     if (line[0] != 0x50) {
-        fprintf(stderr, "spximg detected that file '%s' is not a PPM\n", path);
-        goto spxImageLoadPpmEnd;
+        fprintf(stderr, "spximg: file is not PNM file format: %s\n", path);
+        goto spxImageLoadPnmEnd;
     }
     
     N = line[1];
     if (N < '1' || N > '6') {
-        fprintf(stderr, "spximg does not support this kind of PPM: %s: P%c\n", path, N);
-        goto spxImageLoadPpmEnd;
+        fprintf(stderr, "spximg does not support this kind of PNM: %s: P%c\n", path, N);
+        goto spxImageLoadPnmEnd;
     }
 
     paramsize = (N == '1' || N == '4') ? 2 : 3;
@@ -872,16 +884,16 @@ Img2D spxImageLoadPnm(const char* path)
         if (!tok || tok[0] == '#') {
             filepos = ftell(file);
             if (!(key = fgets(line, LINESIZE, file))) {
-                fprintf(stderr, "spximg could not parse complete PPM in file: %s\n",
+                fprintf(stderr, "spximg could not parse complete PNM in file: %s\n",
                     path
                 );
-                goto spxImageLoadPpmEnd;
+                goto spxImageLoadPnmEnd;
             }
         } else if (!isdigit(tok[0])) {
-            fprintf(stderr, "spximg detected invalid token in PPM header: %s: %s\n",
+            fprintf(stderr, "spximg detected invalid token in PNM header: %s: %s\n",
                 path, tok
             );
-            goto spxImageLoadPpmEnd;
+            goto spxImageLoadPnmEnd;
         } else {
             params[paramcount++] = atoi(tok);
         }
@@ -890,9 +902,9 @@ Img2D spxImageLoadPnm(const char* path)
     for (paramcount = 0; paramcount < paramsize; ++paramcount) {
          if (!params[paramcount]) {
             fprintf( stderr, 
-                "PPM file '%s' has zero value in width, height or bitdepth\n", path
+                "spximg detected illegal PNM with zero value in: %s\n", path
             );
-            goto spxImageLoadPpmEnd;
+            goto spxImageLoadPnmEnd;
         }
     }
 
@@ -916,28 +928,28 @@ Img2D spxImageLoadPnm(const char* path)
 
     if (!image.pixbuf) {
         fprintf(stderr,
-             "spximg detected that PPM file '%s' is incomplete or corrupted\n", path
+             "spximg detected incomplete or corrupted PNM file: %s\n", path
         );
     }
 
-spxImageLoadPpmEnd:
+spxImageLoadPnmEnd:
     fclose(file);
     return image;
 }
 
-int spxImageSavePpm(const Img2D img, const char* path)
+int spxImageSavePnm(const Img2D img, const char* path)
 {
     FILE* file;
-
+    
     if (img.channels != 3) {
         int ret;
         Img2D tmp = spxImageReshape(img, 3);
-        ret = spxImageSavePpm(tmp, path);
+        ret = spxImageSavePnm(tmp, path);
         spxImageFree(&tmp);
         return ret;
     }
 
-    file = fopen(path, "wb");
+    file = fopen(path, "w");
     if (!file) {
         fprintf(stderr, "spximg could not write file: '%s'\n", path);
         return EXIT_FAILURE;
@@ -974,7 +986,7 @@ int spxImageSave(const Img2D image, const char* path)
     switch (spxParseExtension(path)) {
         case SPXI_FORMAT_PNG: return spxImageSavePng(image, path);
         case SPXI_FORMAT_JPEG: return spxImageSaveJpeg(image, path, SPXI_JPEG_QUALITY);
-        case SPXI_FORMAT_PNM: return spxImageSavePpm(image, path);
+        case SPXI_FORMAT_PNM: return spxImageSavePnm(image, path);
     }
 
     fprintf(stderr, "spximg only supports saving images as PNG, JPEG and PPM\n");
