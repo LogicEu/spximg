@@ -90,6 +90,7 @@ void spxImageFree(Img2D* image);
 #define SPXI_FORMAT_JPEG        2
 #define SPXI_FORMAT_GIF         3
 #define SPXI_FORMAT_PNM         4
+#define SPXI_FORMAT_BMP         5
 
 #define SPXI_COLOR_UNKNOWN      0
 #define SPXI_COLOR_GRAY         1
@@ -109,18 +110,27 @@ void spxImageFree(Img2D* image);
     #define SPXI_NO_JPEG
     #define SPXI_NO_GIF
     #define SPXI_NO_PNM
+    #define SPXI_NO_BMP
 #elif defined SPXI_ONLY_JPEG
     #define SPXI_NO_PNG
     #define SPXI_NO_GIF
     #define SPXI_NO_PNM
+    #define SPXI_NO_BMP
 #elif defined SPXI_ONLY_GIF
     #define SPXI_NO_PNG
     #define SPXI_NO_JPEG
     #define SPXI_NO_PNM
+    #define SPXI_NO_BMP
 #elif defined SPXI_ONLY_PNM
     #define SPXI_NO_PNG
     #define SPXI_NO_JPEG
     #define SPXI_NO_GIF
+    #define SPXI_NO_BMP
+#elif defined SPXI_ONLY_BMP
+    #define SPXI_NO_PNG
+    #define SPXI_NO_JPEG
+    #define SPXI_NO_GIF
+    #define SPXI_NO_PNM
 #endif /* SPXI_ONLY_FORMAT */
 
 /* Parsing Name Extensions and File Headers */
@@ -128,7 +138,9 @@ void spxImageFree(Img2D* image);
 #define spxParseHeaderPng(h) (!memcmp(h, "\211PNG\r\n\032\n", 8))
 #define spxParseHeaderJpeg(h) (h[0] == 0xFF && h[1] == 0xD8 && h[2] == 0xFF)
 #define spxParseHeaderGif(h) (!memcmp(h, "GIF87a", 6) || !memcmp(h, "GIF89a", 6))
-#define spxParseHeaderPnm(h) ((h[0] == 0x50 && (h[1] > 0x30 || h[1] < 0x37) && isspace(h[2])))
+#define spxParseHeaderPnm(h) ((h[0] == 0x50 && (h[1] > 0x30 || h[1] < 0x37) &&\
+                                isspace(h[2])))
+#define spxParseHeaderBmp(h) (h[0] == 0x42 && h[1] == 0x4D)
 
 static int spxStrcmpLower(const char* s1, const char* s2)
 {
@@ -160,6 +172,8 @@ static int spxParseExtension(const char* path)
         } else if (spxStrcmpLower(ext, "pnm") || spxStrcmpLower(ext, "ppm") ||
                     spxStrcmpLower(ext, "pgm") || spxStrcmpLower(ext, "pbm")) {
             return SPXI_FORMAT_PNM;
+        } else if (spxStrcmpLower(ext, "bmp")) {
+            return SPXI_FORMAT_BMP;
         }
     }
 
@@ -176,6 +190,8 @@ static int spxParseHeader(const uint8_t* header)
         return SPXI_FORMAT_GIF;
     } else if (spxParseHeaderPnm(header)) {
         return SPXI_FORMAT_PNM;
+    } else if (spxParseHeaderBmp(header)) {
+        return SPXI_FORMAT_BMP;
     }
 
     return SPXI_FORMAT_UNKNOWN;
@@ -194,12 +210,13 @@ static int spxParseFormat(const char* path)
 
     fread(header, SPXI_HEADER_SIZE, sizeof(uint8_t), file);
     fclose(file);
-    
+
     format = spxParseExtension(path);
     if ((format == SPXI_FORMAT_PNG && spxParseHeaderPng(header)) ||
         (format == SPXI_FORMAT_JPEG && spxParseHeaderJpeg(header)) ||
         (format == SPXI_FORMAT_GIF && spxParseHeaderGif(header)) ||
-        (format == SPXI_FORMAT_PNM && spxParseHeaderPnm(header))) {
+        (format == SPXI_FORMAT_PNM && spxParseHeaderPnm(header)) ||
+        (format == SPXI_FORMAT_BMP && spxParseHeaderBmp(header))) {
         return format;
     }
 
@@ -961,6 +978,182 @@ int spxImageSavePnm(const Img2D img, const char* path)
 }
 
 #endif /* SPXI_NO_PNM */
+#ifndef SPXI_NO_BMP
+
+#define BUG fprintf(stderr, "%s %s %d\n", __FILE__, __func__, __LINE__)
+
+/*
+Img2D spxImageLoadBmp8bit(FILE* file, const int width, const int height, const int bpp)
+{
+    Img2D image = {NULL, 0, 0, 0};
+    (void)file;
+    (void)width;
+    (void)height;
+    (void)bpp;
+    return image;
+}
+*/
+
+/*
+static spxImageLoadBmpPalette(FILE* file, 
+    const int width, const int height, const int bpp, const int colors)
+{
+
+}
+*/
+
+Img2D spxImageLoadBmp(const char* path)
+{
+    FILE* file;
+    uint16_t id;
+    int dif, stride, rowsize;
+    Img2D image = {NULL, 0, 0, 0};
+    struct BmpHeader {
+        uint32_t size;
+        uint16_t reserved1, reserved2;
+        uint32_t offset; 
+        struct BmpDibHeader {
+            uint32_t size;
+            int32_t width, height;
+            uint16_t planes, bpp;
+            uint32_t compression, imgsize;
+            int32_t res[2];
+            uint32_t colors[2];
+        } dib;
+        char padding[256];
+    } bmp;
+
+    file = fopen(path, "rb");
+    if (!file) {
+        fprintf(stderr, "spximg could not open file: %s\n", path);
+        return image;
+    }
+
+    if (!fread(&id, sizeof(id), 1, file)) {
+        fprintf(stderr, "spximg could not parse file: %s\n", path);
+        goto spxImageLoadBmpEnd;
+    }
+
+    if (id != 0x4D42) {
+        fprintf(stderr, "spximg: file is not BMP format: %s\n", path);
+        goto spxImageLoadBmpEnd;
+    }
+
+    if (!fread(&bmp, offsetof(struct BmpHeader, dib), 1, file)) {
+        fprintf(stderr, "spximg could not parse file: %s\n", path);
+        goto spxImageLoadBmpEnd;
+    }
+
+    if (!fread(&bmp.dib, sizeof(bmp.dib.size), 1, file)) {
+        fprintf(stderr, "spximg: file is not BMP format: %s\n", path);
+        goto spxImageLoadBmpEnd;
+    }
+
+    if (!fread(&bmp.dib.width, bmp.dib.size - sizeof(bmp.dib.size), 1, file)) {
+        fprintf(stderr, "spximg could not parse file: %s\n", path);
+        goto spxImageLoadBmpEnd;
+    } 
+ 
+    printf("sizeof id: %zu\n", sizeof(id));
+    printf("size: %u %zu\n", bmp.size, offsetof(struct BmpHeader, size) + 2);
+    printf("reserved1: %d %zu\n", bmp.reserved1, offsetof(struct BmpHeader, reserved1) + 2);
+    printf("reserved2: %d %zu\n", bmp.reserved2, offsetof(struct BmpHeader, reserved2) + 2);
+    printf("offset: %d %zu\n", bmp.offset, offsetof(struct BmpHeader, offset) + 2);
+    
+    printf("dibsize: %d %zu\n", bmp.dib.size, offsetof(struct BmpHeader, dib.size) + 2);
+    printf("width: %d %zu\n", bmp.dib.width, offsetof(struct BmpHeader, dib.width) + 2);
+    printf("height: %d %zu\n", bmp.dib.height, offsetof(struct BmpHeader, dib.height) + 2);
+    printf("planes: %d %zu\n", bmp.dib.planes, offsetof(struct BmpHeader, dib.planes) + 2);
+    printf("bpp: %d %zu\n", bmp.dib.bpp, offsetof(struct BmpHeader, dib.bpp) + 2);
+    printf("compression: %d %zu\n", bmp.dib.compression, offsetof(struct BmpHeader, dib.compression) + 2);
+    printf("imgsize: %d %zu\n", bmp.dib.imgsize, offsetof(struct BmpHeader, dib.imgsize) + 2);
+    printf("xres: %d %zu\n", bmp.dib.res[0], offsetof(struct BmpHeader, dib.res[0]) + 2);
+    printf("yres: %d %zu\n", bmp.dib.res[1], offsetof(struct BmpHeader, dib.res[1]) + 2);
+    printf("colors: %d %zu\n", bmp.dib.colors[0], offsetof(struct BmpHeader, dib.colors[0]) + 2);
+    printf("important colors: %d %zu\n", bmp.dib.colors[1], offsetof(struct BmpHeader, dib.colors[1]) + 2);
+
+
+    if (bmp.dib.planes != 1 || bmp.dib.compression != 0 || bmp.dib.bpp == 0) {
+        fprintf(stderr, "spximg does not support this kind of BMP file: %s\n", path);
+        goto spxImageLoadBmpEnd;
+    }
+
+    rowsize = bmp.dib.width * bmp.dib.bpp;
+    for (stride = (rowsize >> 3) + !!(rowsize % 8); stride % 4; ++stride);
+
+    assert(ftell(file) == 14 + bmp.dib.size);
+
+    image.width = bmp.dib.width;
+    image.height = bmp.dib.height;
+
+    if (bmp.dib.bpp <= 8) {
+        uint8_t* palette, *scanline;
+        int x, y, i, j, div, palette_size = bmp.dib.colors[0] * 4;
+        printf("palette_size: %d\n", palette_size);
+        if (!bmp.dib.colors[0] || bmp.dib.colors[0] > (1 << bmp.dib.bpp)) {
+            fprintf(stderr,
+                "spximg could not guess size of color pallete in BMP file: %s\n", path
+            );
+            goto spxImageLoadBmpEnd;
+        }
+
+        image.channels = 4;
+        image.pixbuf = malloc(image.width * image.height * 4);
+        palette = malloc(palette_size);
+        scanline = malloc(stride);
+        fread(palette, palette_size, 1, file);
+
+#if 1 /* FILL ALPHA WITH 0xFF FOR EASY DEBUGGING */
+        for (i = 0; i < (int)bmp.dib.colors[0]; ++i) {
+            printf("%d, %d, %d, %d\n",
+            palette[i * 4], palette[i * 4 + 1], palette[i * 4 + 2], palette[i * 4 + 3]
+            );
+            palette[i * 4 + 3] = 0xFF;
+        }
+#endif
+
+        dif = bmp.offset - ftell(file);
+        printf("dif: %d\n", dif);
+        if (dif) {
+            fseek(file, dif, SEEK_CUR);
+        }
+
+        div = 8 / bmp.dib.bpp;
+        for (y = 0; y < image.height; ++y) {
+            i = (image.height - y - 1) * image.width * 4;
+            fread(scanline, stride, 1, file);
+            for (x = 0; x < image.width; ++x) {
+                int ibyte, ibit = x % div, n = 0;
+                ibyte = x / div + !!ibit;
+                ibit *= bmp.dib.bpp;
+                for (j = 0; j < bmp.dib.bpp; ++j) {
+                    int bit = (scanline[ibyte] >> (ibit + j)) & 0x01;
+                    n |= bit << j;
+                }
+ 
+                n *= 4;
+                image.pixbuf[i++] = palette[n++ + 2];
+                image.pixbuf[i++] = palette[n++];
+                image.pixbuf[i++] = palette[n++ - 2];
+                image.pixbuf[i++] = palette[n];
+            }
+        }
+
+        free(palette);
+        free(scanline);
+    } else {
+        fprintf(stderr, "spximg is not ready to parse this kind of BMP yet: %s\n",
+            path
+        );
+        goto spxImageLoadBmpEnd;
+    }
+
+spxImageLoadBmpEnd:
+    fclose(file);
+    return image;
+}
+
+#endif /* SPXI_NO_BMP */
 
 /* Generic Saving and Loading */
 
@@ -974,6 +1167,7 @@ Img2D spxImageLoad(const char* path)
         case SPXI_FORMAT_PNG: image = spxImageLoadPng(path); break;
         case SPXI_FORMAT_JPEG: image = spxImageLoadJpeg(path); break;
         case SPXI_FORMAT_PNM: image = spxImageLoadPnm(path); break;
+        case SPXI_FORMAT_BMP: image = spxImageLoadBmp(path); break;
         case SPXI_FORMAT_UNKNOWN: 
             fprintf(stderr, "spximg could not recognize format: %s\n", path);
     }

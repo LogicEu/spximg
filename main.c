@@ -37,8 +37,8 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 static const char* spxImageFormatName(int format)
 {
-    static const char* table[] = {"Unknown", "PNG", "JPEG", "GIF", "PPM"};
-    return table[format > 4 ? 0 : format];
+    static const char* table[] = {"Unknown", "PNG", "JPEG", "GIF", "PPM", "BMP"};
+    return table[format > 5 ? 0 : format];
 }
 
 static const char* spxImageColorName(int channels)
@@ -126,9 +126,9 @@ int main(const int argc, const char** argv)
                     spxImageSave(image, path);
                 }
             } else if (cmd[0] == 'o' && !cmd[1]) {
-                if (!spximgCheckImage(image.pixbuf, path, argv[0], argv[i]) &&
-                    !spximgCheckArgs(argc, i, argv[0], argv[i])) {
-                    spxImageSave(image, argv[++i]);
+                if (!spximgCheckImage(image.pixbuf, path, argv[0], argv[i++]) &&
+                    !spximgCheckArgs(argc, i - 1, argv[0], argv[i - 1])) {
+                    spxImageSave(image, argv[i]);
                 }
             } else if (cmd[0] == 'n' && !cmd[1]) {
                 if (!spximgCheckImage(image.pixbuf, path, argv[0], argv[i]) &&
