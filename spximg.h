@@ -980,28 +980,6 @@ int spxImageSavePnm(const Img2D img, const char* path)
 #endif /* SPXI_NO_PNM */
 #ifndef SPXI_NO_BMP
 
-#define BUG fprintf(stderr, "%s %s %d\n", __FILE__, __func__, __LINE__)
-
-/*
-Img2D spxImageLoadBmp8bit(FILE* file, const int width, const int height, const int bpp)
-{
-    Img2D image = {NULL, 0, 0, 0};
-    (void)file;
-    (void)width;
-    (void)height;
-    (void)bpp;
-    return image;
-}
-*/
-
-/*
-static spxImageLoadBmpPalette(FILE* file, 
-    const int width, const int height, const int bpp, const int colors)
-{
-
-}
-*/
-
 Img2D spxImageLoadBmp(const char* path)
 {
     FILE* file;
@@ -1054,27 +1032,26 @@ Img2D spxImageLoadBmp(const char* path)
         goto spxImageLoadBmpEnd;
     } 
  
-    printf("sizeof id: %zu\n", sizeof(id));
-    printf("size: %u %zu\n", bmp.size, offsetof(struct BmpHeader, size) + 2);
-    printf("reserved1: %d %zu\n", bmp.reserved1, offsetof(struct BmpHeader, reserved1) + 2);
-    printf("reserved2: %d %zu\n", bmp.reserved2, offsetof(struct BmpHeader, reserved2) + 2);
-    printf("offset: %d %zu\n", bmp.offset, offsetof(struct BmpHeader, offset) + 2);
-    
-    printf("dibsize: %d %zu\n", bmp.dib.size, offsetof(struct BmpHeader, dib.size) + 2);
-    printf("width: %d %zu\n", bmp.dib.width, offsetof(struct BmpHeader, dib.width) + 2);
-    printf("height: %d %zu\n", bmp.dib.height, offsetof(struct BmpHeader, dib.height) + 2);
-    printf("planes: %d %zu\n", bmp.dib.planes, offsetof(struct BmpHeader, dib.planes) + 2);
-    printf("bpp: %d %zu\n", bmp.dib.bpp, offsetof(struct BmpHeader, dib.bpp) + 2);
-    printf("compression: %d %zu\n", bmp.dib.compression, offsetof(struct BmpHeader, dib.compression) + 2);
-    printf("imgsize: %d %zu\n", bmp.dib.imgsize, offsetof(struct BmpHeader, dib.imgsize) + 2);
-    printf("xres: %d %zu\n", bmp.dib.res[0], offsetof(struct BmpHeader, dib.res[0]) + 2);
-    printf("yres: %d %zu\n", bmp.dib.res[1], offsetof(struct BmpHeader, dib.res[1]) + 2);
-    printf("colors: %d %zu\n", bmp.dib.colors[0], offsetof(struct BmpHeader, dib.colors[0]) + 2);
-    printf("important colors: %d %zu\n", bmp.dib.colors[1], offsetof(struct BmpHeader, dib.colors[1]) + 2);
-
+#if 1
+    printf("size: %u\n", bmp.size);
+    printf("reserved1: %d\n", bmp.reserved1);
+    printf("reserved2: %d\n", bmp.reserved2);
+    printf("offset: %d\n", bmp.offset);
+    printf("dibsize: %d\n", bmp.dib.size);
+    printf("width: %d\n", bmp.dib.width);
+    printf("height: %d\n", bmp.dib.height);
+    printf("planes: %d\n", bmp.dib.planes);
+    printf("bpp: %d\n", bmp.dib.bpp);
+    printf("compression: %d\n", bmp.dib.compression);
+    printf("imgsize: %d\n", bmp.dib.imgsize);
+    printf("xres: %d\n", bmp.dib.res[0]);
+    printf("yres: %d\n", bmp.dib.res[1]);
+    printf("colors: %d\n", bmp.dib.colors[0]);
+    printf("important colors: %d\n", bmp.dib.colors[1]);
+#endif
 
     if (bmp.dib.planes != 1 || bmp.dib.bpp == 0 || 
-        (bmp.dib.bpp != 32 && bmp.dib.compression != 0)) {
+        ((bmp.dib.bpp != 32 && bmp.dib.bpp != 16) && bmp.dib.compression != 0)) {
         fprintf(stderr, "spximg does not support this kind of BMP file: %s\n", path);
         goto spxImageLoadBmpEnd;
     }
@@ -1087,10 +1064,13 @@ Img2D spxImageLoadBmp(const char* path)
     image.width = bmp.dib.width;
     image.height = bmp.dib.height;
 
-    if (bmp.dib.bpp <= 8 && bmp.dib.colors[0]) {
+    if (bmp.dib.bpp <= 8 && (bmp.dib.compression == 0 || bmp.dib.compression == 3)) {
         /* remove scanline, read into pixelbuffer */
         uint8_t* palette, *scanline;
-        int x, y, i, j, div, palette_size = bmp.dib.colors[0] * 4;
+        int x, y, i, j, div, colorcount, palette_size;
+        dif = bmp.offset - ftell(file);
+        palette_size = bmp.dib.colors[0] ? bmp.dib.colors[0] << 2 : dif;
+        colorcount = palette_size >> 2;
         printf("palette_size: %d\n", palette_size);
         if (bmp.dib.colors[0] > (1 << bmp.dib.bpp)) {
             fprintf(stderr,
@@ -1105,8 +1085,8 @@ Img2D spxImageLoadBmp(const char* path)
         scanline = (uint8_t*)malloc(stride);
         fread(palette, palette_size, 1, file);
 
-#if 1 /* FILL ALPHA WITH 0xFF FOR EASY DEBUGGING */
-        for (i = 0; i < (int)bmp.dib.colors[0]; ++i) {
+#if 1   /* FILL ALPHA WITH 0xFF FOR EASY DEBUGGING */
+        for (i = 0; i < colorcount; ++i) {
             printf("%d, %d, %d, %d\n",
             palette[i * 4], palette[i * 4 + 1], palette[i * 4 + 2], palette[i * 4 + 3]
             );
@@ -1133,11 +1113,11 @@ Img2D spxImageLoadBmp(const char* path)
                     n |= bit << j;
                 }
  
-                n *= 4;
-                image.pixbuf[i++] = palette[n++ + 2];
-                image.pixbuf[i++] = palette[n++];
-                image.pixbuf[i++] = palette[n++ - 2];
-                image.pixbuf[i++] = palette[n];
+                n <<= 2;
+                image.pixbuf[i++] = palette[n + 2];
+                image.pixbuf[i++] = palette[n + 1];
+                image.pixbuf[i++] = palette[n + 0];
+                image.pixbuf[i++] = palette[n + 3];
             }
         }
 
@@ -1229,6 +1209,64 @@ Img2D spxImageLoadBmp(const char* path)
                 image.pixbuf[i++] = (n & bitmask.a) >> offset.a;
             }
         }
+    } else if (bmp.dib.bpp == 16 && (!bmp.dib.compression || bmp.dib.compression == 3)) {
+        uint8_t* scanline;
+        int x, y, i, linesize = 4 * image.width;
+        struct bitmask {
+            uint32_t r, g, b;
+        } bitmask, maskdif = {0}, offset = {0};
+
+        dif = bmp.offset - ftell(file);
+        printf("dif: %d\n", dif);
+        if (dif) {
+            fread(&bitmask, dif, 1, file);
+        } else {
+            bitmask = *(struct bitmask*)bmp.padding;
+        }
+        if (!bmp.dib.compression) {
+            bitmask.r = 0x7c00;
+            bitmask.g = 0x03e0;
+            bitmask.b = 0x001f;
+        }
+
+        printf("r: %08x\ng: %08x\nb: %08x\n\n",
+            bitmask.r, bitmask.g, bitmask.b
+        );
+
+        while (!((bitmask.r >> offset.r) & 0x01)) ++offset.r;
+        while (!((bitmask.g >> offset.g) & 0x01)) ++offset.g;
+        while (!((bitmask.b >> offset.b) & 0x01)) ++offset.b;
+        while ((bitmask.r >> (offset.r + maskdif.r)) & 0x01) ++maskdif.r;
+        while ((bitmask.g >> (offset.g + maskdif.g)) & 0x01) ++maskdif.g;
+        while ((bitmask.b >> (offset.b + maskdif.b)) & 0x01) ++maskdif.b;
+
+        printf("%d:%d:%d\n", maskdif.r, maskdif.g, maskdif.b);
+        printf("%d:%d:%d\n", offset.r, offset.g, offset.b);
+        printf("r: %08x\ng: %08x\nb: %08x\n\n",
+            bitmask.r >> offset.r, bitmask.g >> offset.g, bitmask.b >> offset.b
+        );
+
+        maskdif.r = 8 - maskdif.r;
+        maskdif.g = 8 - maskdif.g;
+        maskdif.b = 8 - maskdif.b;
+
+        image.channels = 4;
+        image.pixbuf = (uint8_t*)malloc(linesize * image.height);
+        scanline = (uint8_t*)malloc(stride);
+
+        for (y = image.height - 1; y >= 0; --y) {
+            i = y * linesize;
+            fread(scanline, stride, 1, file);
+            for (x = 0; x < image.width; ++x) {
+                uint16_t n = *(uint16_t*)(scanline + (x << 1));
+                image.pixbuf[i++] = ((n & bitmask.r) >> offset.r) << maskdif.r;
+                image.pixbuf[i++] = ((n & bitmask.g) >> offset.g) << maskdif.g;
+                image.pixbuf[i++] = ((n & bitmask.b) >> offset.b) << maskdif.b;
+                image.pixbuf[i++] = 0xff;
+            }
+        }
+
+        free(scanline);
     } else {
         fprintf(stderr, "spximg is not ready to parse this kind of BMP yet: %s\n",
             path
