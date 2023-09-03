@@ -1073,7 +1073,8 @@ Img2D spxImageLoadBmp(const char* path)
     printf("important colors: %d %zu\n", bmp.dib.colors[1], offsetof(struct BmpHeader, dib.colors[1]) + 2);
 
 
-    if (bmp.dib.planes != 1 || bmp.dib.compression != 0 || bmp.dib.bpp == 0) {
+    if (bmp.dib.planes != 1 || bmp.dib.bpp == 0 || 
+        (bmp.dib.bpp != 32 && bmp.dib.compression != 0)) {
         fprintf(stderr, "spximg does not support this kind of BMP file: %s\n", path);
         goto spxImageLoadBmpEnd;
     }
@@ -1086,11 +1087,12 @@ Img2D spxImageLoadBmp(const char* path)
     image.width = bmp.dib.width;
     image.height = bmp.dib.height;
 
-    if (bmp.dib.bpp <= 8) {
+    if (bmp.dib.bpp <= 8 && bmp.dib.colors[0]) {
+        /* remove scanline, read into pixelbuffer */
         uint8_t* palette, *scanline;
         int x, y, i, j, div, palette_size = bmp.dib.colors[0] * 4;
         printf("palette_size: %d\n", palette_size);
-        if (!bmp.dib.colors[0] || bmp.dib.colors[0] > (1 << bmp.dib.bpp)) {
+        if (bmp.dib.colors[0] > (1 << bmp.dib.bpp)) {
             fprintf(stderr,
                 "spximg could not guess size of color pallete in BMP file: %s\n", path
             );
@@ -1099,8 +1101,8 @@ Img2D spxImageLoadBmp(const char* path)
 
         image.channels = 4;
         image.pixbuf = malloc(image.width * image.height * 4);
-        palette = malloc(palette_size);
-        scanline = malloc(stride);
+        palette = (uint8_t*)malloc(palette_size);
+        scanline = (uint8_t*)malloc(stride);
         fread(palette, palette_size, 1, file);
 
 #if 1 /* FILL ALPHA WITH 0xFF FOR EASY DEBUGGING */
@@ -1141,6 +1143,92 @@ Img2D spxImageLoadBmp(const char* path)
 
         free(palette);
         free(scanline);
+    } else if (bmp.dib.bpp == 24) {
+        uint8_t* scanline;
+        int x, y, i, n, linesize = image.width * 3;
+        dif = bmp.offset - ftell(file);
+        printf("dif: %d\n", dif);
+        if (dif) {
+            fseek(file, dif, SEEK_CUR);
+        }
+
+        image.channels = 3;
+        image.pixbuf = (uint8_t*)malloc(image.height * linesize);
+        scanline = (uint8_t*)malloc(stride);
+        
+        for (y = image.height - 1; y >= 0; --y) {
+            fread(scanline, stride, 1, file);
+            n = 0, i = y * linesize;
+            for (x = 0; x < image.width; ++x) {
+                image.pixbuf[i++] = scanline[n++ + 2];
+                image.pixbuf[i++] = scanline[n++];
+                image.pixbuf[i++] = scanline[n++ - 2];
+            }
+        }
+
+        free(scanline);
+    } else if (bmp.dib.bpp == 32 && bmp.dib.compression == 3) {
+        int x, y, i, n;
+        struct bitmask {
+            int r, g, b, a;
+        } bitmask, offset = {0, 0, 0, 0};
+
+        bitmask = *(struct bitmask*)bmp.padding;
+        while (!((bitmask.r >> offset.r) & 1)) ++offset.r;
+        while (!((bitmask.g >> offset.g) & 1)) ++offset.g;
+        while (!((bitmask.b >> offset.b) & 1)) ++offset.b;
+        while (!((bitmask.a >> offset.a) & 1)) ++offset.a;
+
+        dif = bmp.offset - ftell(file);
+        printf("dif: %d\n", dif);
+        if (dif) {
+            fseek(file, dif, SEEK_CUR);
+        }
+
+        image.channels = 4;
+        image.pixbuf = (uint8_t*)malloc(stride * image.height);
+
+        for (y = image.height - 1; y >= 0; --y) {
+            i = y * stride;
+            fread(image.pixbuf + i, stride, 1, file);
+            for (x = 0; x < image.width; ++x) {
+                n = *(int*)(image.pixbuf + i);
+                image.pixbuf[i++] = (n & bitmask.r) >> offset.r;
+                image.pixbuf[i++] = (n & bitmask.g) >> offset.g;
+                image.pixbuf[i++] = (n & bitmask.b) >> offset.b;
+                image.pixbuf[i++] = (n & bitmask.a) >> offset.a;
+            }
+        }
+    } else if (bmp.dib.bpp == 32 && bmp.dib.compression == 0) {
+        int x, y, i, n;
+        struct bitmask {
+            int r, g, b, a;
+        } bitmask = {0x00ff0000, 0x0000ff00, 0x000000ff, 0xff000000}, offset = {0};
+        while (!((bitmask.r >> offset.r) & 1)) ++offset.r;
+        while (!((bitmask.g >> offset.g) & 1)) ++offset.g;
+        while (!((bitmask.b >> offset.b) & 1)) ++offset.b;
+        while (!((bitmask.a >> offset.a) & 1)) ++offset.a;
+
+        dif = bmp.offset - ftell(file);
+        printf("dif: %d\n", dif);
+        if (dif) {
+            fseek(file, dif, SEEK_CUR);
+        }
+
+        image.channels = 4;
+        image.pixbuf = (uint8_t*)malloc(stride * image.height);
+
+        for (y = image.height - 1; y >= 0; --y) {
+            i = y * stride;
+            fread(image.pixbuf + i, stride, 1, file);
+            for (x = 0; x < image.width; ++x) {
+                n = *(int*)(image.pixbuf + i);
+                image.pixbuf[i++] = (n & bitmask.r) >> offset.r;
+                image.pixbuf[i++] = (n & bitmask.g) >> offset.g;
+                image.pixbuf[i++] = (n & bitmask.b) >> offset.b;
+                image.pixbuf[i++] = (n & bitmask.a) >> offset.a;
+            }
+        }
     } else {
         fprintf(stderr, "spximg is not ready to parse this kind of BMP yet: %s\n",
             path
