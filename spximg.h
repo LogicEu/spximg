@@ -1030,25 +1030,7 @@ Img2D spxImageLoadBmp(const char* path)
     if (!fread(&bmp.dib.width, bmp.dib.size - sizeof(bmp.dib.size), 1, file)) {
         fprintf(stderr, "spximg could not parse file: %s\n", path);
         goto spxImageLoadBmpEnd;
-    } 
- 
-#if 1
-    printf("size: %u\n", bmp.size);
-    printf("reserved1: %d\n", bmp.reserved1);
-    printf("reserved2: %d\n", bmp.reserved2);
-    printf("offset: %d\n", bmp.offset);
-    printf("dibsize: %d\n", bmp.dib.size);
-    printf("width: %d\n", bmp.dib.width);
-    printf("height: %d\n", bmp.dib.height);
-    printf("planes: %d\n", bmp.dib.planes);
-    printf("bpp: %d\n", bmp.dib.bpp);
-    printf("compression: %d\n", bmp.dib.compression);
-    printf("imgsize: %d\n", bmp.dib.imgsize);
-    printf("xres: %d\n", bmp.dib.res[0]);
-    printf("yres: %d\n", bmp.dib.res[1]);
-    printf("colors: %d\n", bmp.dib.colors[0]);
-    printf("important colors: %d\n", bmp.dib.colors[1]);
-#endif
+    }
 
     if (bmp.dib.planes != 1 || bmp.dib.bpp == 0 || 
         ((bmp.dib.bpp != 32 && bmp.dib.bpp != 16) && bmp.dib.compression != 0)) {
@@ -1067,11 +1049,30 @@ Img2D spxImageLoadBmp(const char* path)
     if (bmp.dib.bpp <= 8 && (bmp.dib.compression == 0 || bmp.dib.compression == 3)) {
         /* remove scanline, read into pixelbuffer */
         uint8_t* palette, *scanline;
+        struct bitmask { int r, g, b, a; } bitmask, offset = {0}, maskdif = {0};
         int x, y, i, j, div, colorcount, palette_size;
         dif = bmp.offset - ftell(file);
         palette_size = bmp.dib.colors[0] ? bmp.dib.colors[0] << 2 : dif;
+
+        if (bmp.dib.size > 40) {
+            bitmask = *(struct bitmask*)bmp.padding;
+        } else {
+            struct bitmask bm = {0x00ff0000, 0x0000ff00, 0x000000ff, 0xff000000};
+            bitmask = bm;
+        }
+        
+        while (!((bitmask.r >> offset.r) & 0x01)) ++offset.r;
+        while (!((bitmask.g >> offset.g) & 0x01)) ++offset.g;
+        while (!((bitmask.b >> offset.b) & 0x01)) ++offset.b;
+        while ((bitmask.r >> (offset.r + maskdif.r)) & 0x01) ++maskdif.r;
+        while ((bitmask.g >> (offset.g + maskdif.g)) & 0x01) ++maskdif.g;
+        while ((bitmask.b >> (offset.b + maskdif.b)) & 0x01) ++maskdif.b;
+
+        maskdif.r = 8 - maskdif.r;
+        maskdif.g = 8 - maskdif.g;
+        maskdif.b = 8 - maskdif.b;
+
         colorcount = palette_size >> 2;
-        printf("palette_size: %d\n", palette_size);
         if (bmp.dib.colors[0] > (1 << bmp.dib.bpp)) {
             fprintf(stderr,
                 "spximg could not guess size of color pallete in BMP file: %s\n", path
@@ -1087,15 +1088,11 @@ Img2D spxImageLoadBmp(const char* path)
 
 #if 1   /* FILL ALPHA WITH 0xFF FOR EASY DEBUGGING */
         for (i = 0; i < colorcount; ++i) {
-            printf("%d, %d, %d, %d\n",
-            palette[i * 4], palette[i * 4 + 1], palette[i * 4 + 2], palette[i * 4 + 3]
-            );
             palette[i * 4 + 3] = 0xFF;
         }
 #endif
 
         dif = bmp.offset - ftell(file);
-        printf("dif: %d\n", dif);
         if (dif) {
             fseek(file, dif, SEEK_CUR);
         }
@@ -1106,18 +1103,18 @@ Img2D spxImageLoadBmp(const char* path)
             fread(scanline, stride, 1, file);
             for (x = 0; x < image.width; ++x) {
                 int ibyte, ibit = x % div, n = 0;
-                ibyte = x / div + !!ibit;
+                ibyte = x / div;
                 ibit *= bmp.dib.bpp;
                 for (j = 0; j < bmp.dib.bpp; ++j) {
-                    int bit = (scanline[ibyte] >> (ibit + j)) & 0x01;
+                    int bit = (scanline[ibyte] >> ((ibit + j))) & 0x01;
                     n |= bit << j;
                 }
  
-                n <<= 2;
-                image.pixbuf[i++] = palette[n + 2];
-                image.pixbuf[i++] = palette[n + 1];
-                image.pixbuf[i++] = palette[n + 0];
-                image.pixbuf[i++] = palette[n + 3];
+                n = *(int*)(palette + (n << 2));
+                image.pixbuf[i++] = ((n & bitmask.r) >> offset.r) << maskdif.r;
+                image.pixbuf[i++] = ((n & bitmask.g) >> offset.g) << maskdif.g;
+                image.pixbuf[i++] = ((n & bitmask.b) >> offset.b) << maskdif.b;
+                image.pixbuf[i++] = 0xff;
             }
         }
 
@@ -1127,7 +1124,6 @@ Img2D spxImageLoadBmp(const char* path)
         uint8_t* scanline;
         int x, y, i, n, linesize = image.width * 3;
         dif = bmp.offset - ftell(file);
-        printf("dif: %d\n", dif);
         if (dif) {
             fseek(file, dif, SEEK_CUR);
         }
@@ -1160,7 +1156,6 @@ Img2D spxImageLoadBmp(const char* path)
         while (!((bitmask.a >> offset.a) & 1)) ++offset.a;
 
         dif = bmp.offset - ftell(file);
-        printf("dif: %d\n", dif);
         if (dif) {
             fseek(file, dif, SEEK_CUR);
         }
@@ -1190,7 +1185,6 @@ Img2D spxImageLoadBmp(const char* path)
         while (!((bitmask.a >> offset.a) & 1)) ++offset.a;
 
         dif = bmp.offset - ftell(file);
-        printf("dif: %d\n", dif);
         if (dif) {
             fseek(file, dif, SEEK_CUR);
         }
@@ -1217,7 +1211,6 @@ Img2D spxImageLoadBmp(const char* path)
         } bitmask, maskdif = {0}, offset = {0};
 
         dif = bmp.offset - ftell(file);
-        printf("dif: %d\n", dif);
         if (dif) {
             fread(&bitmask, dif, 1, file);
         } else {
@@ -1229,22 +1222,12 @@ Img2D spxImageLoadBmp(const char* path)
             bitmask.b = 0x001f;
         }
 
-        printf("r: %08x\ng: %08x\nb: %08x\n\n",
-            bitmask.r, bitmask.g, bitmask.b
-        );
-
         while (!((bitmask.r >> offset.r) & 0x01)) ++offset.r;
         while (!((bitmask.g >> offset.g) & 0x01)) ++offset.g;
         while (!((bitmask.b >> offset.b) & 0x01)) ++offset.b;
         while ((bitmask.r >> (offset.r + maskdif.r)) & 0x01) ++maskdif.r;
         while ((bitmask.g >> (offset.g + maskdif.g)) & 0x01) ++maskdif.g;
         while ((bitmask.b >> (offset.b + maskdif.b)) & 0x01) ++maskdif.b;
-
-        printf("%d:%d:%d\n", maskdif.r, maskdif.g, maskdif.b);
-        printf("%d:%d:%d\n", offset.r, offset.g, offset.b);
-        printf("r: %08x\ng: %08x\nb: %08x\n\n",
-            bitmask.r >> offset.r, bitmask.g >> offset.g, bitmask.b >> offset.b
-        );
 
         maskdif.r = 8 - maskdif.r;
         maskdif.g = 8 - maskdif.g;
